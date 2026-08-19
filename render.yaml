@@ -3,5 +3,13 @@ services:
     name: ai-pharmacy-assistant
     runtime: docker
     dockerfilePath: ./Dockerfile
+    branch: mcp-write-test-2026-08-19
     healthCheckPath: /health
     autoDeploy: true
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: OTP_DELIVERY
+        value: "disabled"
