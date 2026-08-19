@@ -5,6 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .enhanced import register as register_enhanced
+
 app = FastAPI(title="AI Pharmacy Assistant", version="3.1.0", description="Accessible medication information assistant with authoritative medication lookup.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False, allow_methods=["*"], allow_headers=["*"])
 
@@ -87,3 +89,5 @@ def buy_links(medicine_name:str):
       {"region":"United States","store":"GoodRx","url":f"https://www.goodrx.com/search?query={q}"},
       {"region":"Worldwide","store":"Google Shopping","url":f"https://www.google.com/search?tbm=shop&q={q}+medicine"}],"notice":"Availability, price, delivery area and prescription requirements vary by country and product. These are external search links, not purchase guarantees."}
 app.mount("/static",StaticFiles(directory="static"),name="static")
+
+register_enhanced(app)
