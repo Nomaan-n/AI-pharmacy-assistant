@@ -8,12 +8,14 @@ from .security import create_otp, verify_otp, create_session, current_user, deli
 from .services_medication import rxnorm_search, rxnorm_properties, interactions, fda_label, india_links
 from .services_ocr import ocr_image, parse_prescription
 from .services_ai import grounded_chat
+from .services_notifications import send_welcome_email, send_email
 router=APIRouter(prefix="/api")
 class Identifier(BaseModel): identifier:str=Field(min_length=3,max_length=320)
 class OTPVerify(BaseModel): identifier:str; code:str=Field(min_length=6,max_length=6)
 class MedicineIn(BaseModel): name:str=Field(min_length=1,max_length=255); rxcui:str|None=None; ingredient:str|None=None; strength:str|None=None; notes:str|None=None
 class ReminderIn(BaseModel): title:str=Field(min_length=1,max_length=255); schedule:str=Field(min_length=1,max_length=255); timezone_name:str="UTC"; medicine_id:int|None=None
 class ChatIn(BaseModel): message:str=Field(min_length=1,max_length=4000); medication:str|None=None
+class ReviewIn(BaseModel): request:str=Field(min_length=10,max_length=4000); category:str=Field(default='medication review',max_length=100)
 def auth_user(authorization,db): return current_user(db,authorization)
 @router.post("/auth/request-otp")
 def request_otp(body:Identifier,db:Session=Depends(get_db)):
@@ -30,7 +32,10 @@ def verify(body:OTPVerify,db:Session=Depends(get_db)):
     if not challenge or not verify_otp(db,challenge,body.code): raise HTTPException(401,"Invalid or expired OTP")
     user=db.query(User).filter_by(identifier=ident).first()
     if not user: user=User(identifier=ident); db.add(user); db.commit(); db.refresh(user)
-    return {"access_token":create_session(db,user),"token_type":"bearer","expires_in":604800}
+    token=create_session(db,user)
+    try: send_welcome_email(ident)
+    except Exception: pass
+    return {"access_token":token,"token_type":"bearer","expires_in":604800,"welcome_email":"queued_if_email_delivery_is_configured"}
 @router.get("/me")
 def me(authorization:str|None=Header(default=None),db:Session=Depends(get_db)): u=auth_user(authorization,db); return {"id":u.id,"identifier":u.identifier}
 @router.post("/cabinet")
@@ -88,3 +93,11 @@ def check_interactions(names:list[str]):
 def india_medicine(name:str): return {"query":name,"global_concepts":rxnorm_search(name)[:10],"india_resources":india_links(name),"notice":"India availability, brand identity, prescription status and pricing require verification against the local product/package and authorized pharmacy/regulatory sources."}
 @router.post("/chat")
 def chat(body:ChatIn): return grounded_chat(body.message,body.medication)
+@router.post("/human-review")
+def human_review(body:ReviewIn,authorization:str|None=Header(default=None),db:Session=Depends(get_db)):
+    u=auth_user(authorization,db); db.add(AuditEvent(user_id=u.id,event="human_review.requested")); db.commit()
+    review_email=os.getenv("REVIEW_DESTINATION_EMAIL")
+    if review_email:
+        try: send_email(review_email,"PharmaPal human review request",f"User {u.identifier} requested a paid human review. Category: {body.category}. Request: {body.request}")
+        except Exception: pass
+    return {"status":"request_received","price_inr":200,"currency":"INR","payment_status":"not_configured","message":"Human review is an optional paid service. Payment and assignment are not yet connected. No medical outcome or doctor recommendation is guaranteed."}
