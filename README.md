@@ -1,6 +1,15 @@
 # AI Pharmacy Assistant
 
-A lightweight, mobile-friendly pharmacy information demo built with FastAPI.
+A simple, mobile-first medication information assistant. It combines a curated educational dataset with live **NIH RxNorm** medication-concept lookup, so it is not limited to a tiny hard-coded list.
+
+## What it does
+
+- Search common medicines
+- Search the broader RxNorm medication vocabulary
+- Show common uses and high-level safety notes for curated medicines
+- Return RxCUI identifiers for live medication concepts
+- Provide a clean browser UI and JSON API
+- Work well on phones and desktop
 
 ## Run
 
@@ -13,22 +22,17 @@ uvicorn app.main:app --reload
 
 Open `http://127.0.0.1:8000`.
 
-## Features
-
-- Mobile-friendly browser interface
-- Medicine search
-- Common medication information
-- Safety notes and practical tips
-- JSON API
-- Health endpoint
-
 ## API
 
-`GET /health`  
-`GET /api/medicines`  
-`GET /api/medicine/{medicine_name}`  
-`GET /api/search?q={query}`
+- `GET /health`
+- `GET /api/medicines`
+- `GET /api/medicine/{medicine_name}`
+- `GET /api/search?q={query}`
 
-## Safety
+## Important safety boundary
 
-This is an educational demo, not a diagnostic or prescribing system. Medication decisions should be checked with a qualified healthcare professional.
+This is an educational information tool, not a diagnostic or prescribing system. It should not invent doses, diagnose illness, or replace a pharmacist or clinician. Individual dosing, interactions, pregnancy, paediatric use, allergies, contraindications, and emergencies require appropriate professional or authoritative label guidance.
+
+## Data
+
+Medication concept lookup uses the public NIH RxNorm API. RxNorm is useful for broad medication vocabulary and identifiers, but a production clinical product should pair it with authoritative labeling and clinical decision support rather than treating a medication name alone as sufficient safety advice.
