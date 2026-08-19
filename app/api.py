@@ -8,14 +8,14 @@ from .security import create_otp, verify_otp, create_session, current_user, deli
 from .services_medication import rxnorm_search, rxnorm_properties, interactions, fda_label, india_links
 from .services_ocr import ocr_image, parse_prescription
 from .services_ai import grounded_chat
-from .services_notifications import send_welcome_email, send_email
+from .services_notifications import send_welcome_email, send_review_request
 router=APIRouter(prefix="/api")
 class Identifier(BaseModel): identifier:str=Field(min_length=3,max_length=320)
 class OTPVerify(BaseModel): identifier:str; code:str=Field(min_length=6,max_length=6)
 class MedicineIn(BaseModel): name:str=Field(min_length=1,max_length=255); rxcui:str|None=None; ingredient:str|None=None; strength:str|None=None; notes:str|None=None
 class ReminderIn(BaseModel): title:str=Field(min_length=1,max_length=255); schedule:str=Field(min_length=1,max_length=255); timezone_name:str="UTC"; medicine_id:int|None=None
 class ChatIn(BaseModel): message:str=Field(min_length=1,max_length=4000); medication:str|None=None
-class ReviewIn(BaseModel): request:str=Field(min_length=10,max_length=4000); category:str=Field(default='medication review',max_length=100)
+class ReviewIn(BaseModel): request:str=Field(min_length=10,max_length=4000); medicine_names:list[str]=[]
 def auth_user(authorization,db): return current_user(db,authorization)
 @router.post("/auth/request-otp")
 def request_otp(body:Identifier,db:Session=Depends(get_db)):
@@ -25,19 +25,21 @@ def request_otp(body:Identifier,db:Session=Depends(get_db)):
         try: deliver_otp(ident,code)
         except Exception as exc: raise HTTPException(503,f"OTP delivery failed: {exc}")
         return {"status":"issued","challenge_id":challenge.id,"delivery":"smtp"}
-    return {"status":"issued","challenge_id":challenge.id,"delivery":"not_configured","message":"Set OTP_DELIVERY=smtp and supply SMTP credentials through environment variables before production use."}
+    return {"status":"issued","challenge_id":challenge.id,"delivery":"not_configured","message":"Email delivery is not configured yet."}
 @router.post("/auth/verify-otp")
 def verify(body:OTPVerify,db:Session=Depends(get_db)):
     ident=body.identifier.strip().lower(); challenge=db.query(OTPChallenge).filter_by(identifier=ident,consumed=False).order_by(OTPChallenge.created_at.desc()).first()
     if not challenge or not verify_otp(db,challenge,body.code): raise HTTPException(401,"Invalid or expired OTP")
-    user=db.query(User).filter_by(identifier=ident).first()
-    if not user: user=User(identifier=ident); db.add(user); db.commit(); db.refresh(user)
-    token=create_session(db,user)
-    try: send_welcome_email(ident)
-    except Exception: pass
-    return {"access_token":token,"token_type":"bearer","expires_in":604800,"welcome_email":"queued_if_email_delivery_is_configured"}
+    user=db.query(User).filter_by(identifier=ident).first(); created=False
+    if not user: user=User(identifier=ident); db.add(user); db.commit(); db.refresh(user); created=True
+    if created: send_welcome_email(ident)
+    return {"access_token":create_session(db,user),"token_type":"bearer","expires_in":604800}
 @router.get("/me")
 def me(authorization:str|None=Header(default=None),db:Session=Depends(get_db)): u=auth_user(authorization,db); return {"id":u.id,"identifier":u.identifier}
+@router.post("/review")
+def review(body:ReviewIn,authorization:str|None=Header(default=None),db:Session=Depends(get_db)):
+    u=auth_user(authorization,db); send_review_request(u.identifier,body.request,body.medicine_names); db.add(AuditEvent(user_id=u.id,event="human_review.request")); db.commit()
+    return {"status":"received","price_inr":200,"service":"Human medication-information review","notice":"A professional review can help explain medication information and prepare questions for a doctor or pharmacist. It does not diagnose, prescribe, change treatment, or guarantee a medicine or doctor choice.","payment":"not_configured"}
 @router.post("/cabinet")
 def add_medicine(body:MedicineIn,authorization:str|None=Header(default=None),db:Session=Depends(get_db)):
     u=auth_user(authorization,db); matches=rxnorm_search(body.name); rxcui=body.rxcui or (matches[0].get("rxcui") if matches else None)
@@ -63,18 +65,18 @@ def reminders(authorization:str|None=Header(default=None),db:Session=Depends(get
     u=auth_user(authorization,db); return {"reminders":[{"id":r.id,"title":r.title,"schedule":r.schedule,"timezone":r.timezone_name,"enabled":r.enabled} for r in u.reminders]}
 @router.post("/ocr/image")
 async def image_ocr(file:UploadFile=File(...)):
-    try: return ocr_image(await file.read())
-    except Exception as e: raise HTTPException(400,str(e))
+    try:return ocr_image(await file.read())
+    except Exception as e:raise HTTPException(400,str(e))
 @router.post("/ocr/prescription")
 async def prescription_ocr(file:UploadFile=File(...)):
-    try: return parse_prescription(ocr_image(await file.read())["text"])
-    except Exception as e: raise HTTPException(400,str(e))
+    try:return parse_prescription(ocr_image(await file.read())["text"])
+    except Exception as e:raise HTTPException(400,str(e))
 @router.post("/identify/photo")
 async def identify_photo(file:UploadFile=File(...)):
     try: ocr=ocr_image(await file.read())
-    except Exception as e: raise HTTPException(400,str(e))
+    except Exception as e:raise HTTPException(400,str(e))
     candidates=[]
-    for med in parse_prescription(ocr.get("text","")).get("medications",[]): candidates.append({**med,"rxnorm_candidates":rxnorm_search(med["candidate_name"])[:5],"verified":False})
+    for med in parse_prescription(ocr.get("text","")).get("medications",[]):candidates.append({**med,"rxnorm_candidates":rxnorm_search(med["candidate_name"])[:5],"verified":False})
     return {"status":"candidate_identification","ocr":ocr,"candidates":candidates,"notice":"Photo identification is candidate generation only. Confirm the original label/package before treating a medicine as identified."}
 @router.post("/verify")
 def verify_medication(name:str):
@@ -87,17 +89,9 @@ def check_interactions(names:list[str]):
     recognized=[]
     for name in names[:20]:
         ms=rxnorm_search(name)
-        if ms: recognized.append({"input":name,**ms[0]})
+        if ms:recognized.append({"input":name,**ms[0]})
     return {"recognized":recognized,"result":interactions([x.get("rxcui") for x in recognized])}
 @router.get("/india/medicines/{name}")
-def india_medicine(name:str): return {"query":name,"global_concepts":rxnorm_search(name)[:10],"india_resources":india_links(name),"notice":"India availability, brand identity, prescription status and pricing require verification against the local product/package and authorized pharmacy/regulatory sources."}
+def india_medicine(name:str):return {"query":name,"global_concepts":rxnorm_search(name)[:10],"india_resources":india_links(name),"notice":"India availability, brand identity, prescription status and pricing require verification against the local product/package and authorized pharmacy/regulatory sources."}
 @router.post("/chat")
-def chat(body:ChatIn): return grounded_chat(body.message,body.medication)
-@router.post("/human-review")
-def human_review(body:ReviewIn,authorization:str|None=Header(default=None),db:Session=Depends(get_db)):
-    u=auth_user(authorization,db); db.add(AuditEvent(user_id=u.id,event="human_review.requested")); db.commit()
-    review_email=os.getenv("REVIEW_DESTINATION_EMAIL")
-    if review_email:
-        try: send_email(review_email,"PharmaPal human review request",f"User {u.identifier} requested a paid human review. Category: {body.category}. Request: {body.request}")
-        except Exception: pass
-    return {"status":"request_received","price_inr":200,"currency":"INR","payment_status":"not_configured","message":"Human review is an optional paid service. Payment and assignment are not yet connected. No medical outcome or doctor recommendation is guaranteed."}
+def chat(body:ChatIn):return grounded_chat(body.message,body.medication)
