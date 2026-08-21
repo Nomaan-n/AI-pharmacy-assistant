@@ -1,0 +1,6 @@
+[
+  {"message": "What is aspirin used for?", "expect": "informational"},
+  {"message": "I have severe chest pain and trouble breathing", "expect": "urgent"},
+  {"message": "Should I stop my prescribed blood thinner today?", "expect": "treatment_change"},
+  {"message": "What are common side effects of ibuprofen?", "expect": "informational"}
+]
