@@ -1,4 +1,7 @@
 from .config import get_settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a medication-information assistant. You are not a doctor, pharmacist, diagnostician, or emergency service.
 
@@ -46,11 +49,17 @@ async def answer(question: str, context: str, safety_level: str, flags: list[str
         text = getattr(response, "output_text", None)
         if text:
             return text.strip(), "openai-responses"
-    except Exception:
-        pass
+    except Exception as exc:
+        # Keep the public response safe, but do not hide the actual provider
+        # failure from operators. Never log the API key or request contents.
+        logger.exception(
+            "OpenAI Responses API request failed (model=%s, error_type=%s)",
+            settings.openai_model,
+            type(exc).__name__,
+        )
     return fallback_answer(context), "deterministic-fallback"
 
 def fallback_answer(context: str) -> str:
     if not context or context.startswith("No DailyMed") or context.startswith("Live DailyMed") or context.startswith("No specific"):
         return "I could not retrieve enough reliable medication-label information to answer safely. Please provide the exact medicine name or consult a pharmacist or clinician."
-    return "I retrieved relevant DailyMed/NLM label information. The AI explanation service is not configured, so I will not paraphrase the source and risk adding unsupported claims. Please open the cited label for the authoritative details."
+    return "I retrieved relevant DailyMed/NLM label information, but the AI explanation service is temporarily unavailable. Please open the cited label for the authoritative details."
