@@ -1,26 +1,29 @@
 from .config import get_settings
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a medication-information assistant. You are not a doctor, pharmacist, diagnostician, or emergency service.
+SYSTEM_PROMPT = """You are a concise medication-information assistant. You are not a doctor, pharmacist, diagnostician, or emergency service.
 
-Rules:
-- Use only the supplied DailyMed/NLM context for medication facts.
-- Answer the user's actual question directly. Do not dump or reproduce the source label.
-- For simple questions such as "What does this medicine do?", give a short plain-language explanation of what it is, what it generally does, and the main uses only when supported by the supplied source.
-- Keep routine answers to about 2-4 short paragraphs or bullets and preferably under 120 words.
-- Do not list individual organisms, exhaustive indications, or technical label details unless the user specifically asks for them.
+Use only the supplied DailyMed/NLM context for medication facts.
+
+OUTPUT RULES ARE STRICT:
+- Answer only the user's actual question. Never summarize or reproduce the label.
+- For a simple question such as "What does this medicine do?", respond in EXACTLY 2 short paragraphs, with no heading.
+- Paragraph 1: say what the medicine is and, in plain language, what it does.
+- Paragraph 2: give only the 2-4 most common general uses supported by the source.
+- Keep the entire answer under 70 words.
+- Do NOT mention individual bacteria, organisms, strains, beta-lactamase, exhaustive indications, H. pylori, triple therapy, detailed mechanisms, pharmacology, or other technical label details unless the user specifically asks about them.
+- Do not include doses, contraindications, interactions, warnings, or treatment instructions unless the user specifically asks.
 - Do not use Markdown tables.
 - Do not add facts that are not supported by the supplied DailyMed/NLM context.
-- Never invent drug facts, contraindications, interactions, doses, or citations.
-- Do not diagnose.
+- Never diagnose or give individualized treatment advice.
 - Never tell a user to start, stop, increase, or decrease prescription treatment.
-- Never provide individualized dosing instructions.
-- For urgent or treatment-change requests, prioritize appropriate professional care.
-- Clearly distinguish supported information from unknown information.
 - If the source context is insufficient, say so instead of guessing.
-- Keep answers concise, natural, and easy to read on a phone.
+- Write naturally for a phone screen.
+
+IMPORTANT: For a simple "What does it do?" question, do not turn the answer into a mini drug monograph. The user wants a quick explanation, not the full label.
 """
 
 async def answer(question: str, context: str, safety_level: str, flags: list[str]) -> tuple[str, str]:
@@ -62,7 +65,7 @@ async def answer(question: str, context: str, safety_level: str, flags: list[str
         )
         text = getattr(response, "output_text", None)
         if text:
-            return text.strip(), "groq-responses"
+            return compact_answer(text.strip(), question), "groq-responses"
     except Exception as exc:
         # Keep the public response safe, but do not hide the actual provider
         # failure from operators. Never log the API key or request contents.
@@ -72,6 +75,43 @@ async def answer(question: str, context: str, safety_level: str, flags: list[str
             type(exc).__name__,
         )
     return fallback_answer(context), "deterministic-fallback"
+
+
+def compact_answer(text: str, question: str) -> str:
+    """Apply a hard presentation limit after the model responds.
+
+    The prompt asks the provider for a short answer, but this final guard
+    prevents a verbose provider response from becoming a medication monograph.
+    """
+    # Remove accidental headings and common provider formatting noise.
+    text = re.sub(r"^\s*(answer|response)\s*:\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+
+    words = text.split()
+    if len(words) <= 70:
+        return text
+
+    # Prefer complete sentences rather than cutting a medical statement in half.
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    kept: list[str] = []
+    count = 0
+    for sentence in sentences:
+        sentence_words = sentence.split()
+        if not sentence_words:
+            continue
+        if count + len(sentence_words) > 70:
+            break
+        kept.append(sentence.strip())
+        count += len(sentence_words)
+        # Two short sentences are enough for routine medication questions.
+        if count >= 35:
+            break
+
+    if kept:
+        return " ".join(kept)
+
+    return " ".join(words[:70]).rstrip(" ,;:") + "."
+
 
 def fallback_answer(context: str) -> str:
     if not context or context.startswith("No DailyMed") or context.startswith("Live DailyMed") or context.startswith("No specific"):
