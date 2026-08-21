@@ -10,14 +10,34 @@ class GroundingResult:
     sources: list[dict]
     grounded: bool
 
+
 class DailyMedRetriever:
+    """Retrieve relevant DailyMed label context without guessing a medicine."""
+
+    KNOWN = {
+        "acetaminophen", "paracetamol", "ibuprofen", "amoxicillin", "metformin",
+        "amlodipine", "losartan", "atorvastatin", "omeprazole", "cetirizine",
+        "azithromycin", "diclofenac", "pantoprazole", "levothyroxine", "aspirin",
+        "warfarin", "insulin", "prednisone", "salbutamol", "albuterol"
+    }
+    STOPWORDS = {
+        "my", "the", "a", "an", "this", "that", "medicine", "medication",
+        "drug", "tablet", "capsule", "prescribed", "dose", "dosage", "pill",
+        "blood", "thinner", "pain", "question"
+    }
+
     def __init__(self) -> None:
         self.settings = get_settings()
 
     async def retrieve(self, question: str) -> GroundingResult:
         medication = self._extract_medication_candidate(question)
         if not medication:
-            return GroundingResult({}, "No specific medication identified.", [], False)
+            return GroundingResult(
+                {},
+                "No specific medication was identified. Do not infer a drug from a medication category or symptom.",
+                [],
+                False,
+            )
         try:
             async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
                 response = await client.get(
@@ -53,20 +73,19 @@ class DailyMedRetriever:
         except (httpx.HTTPError, ValueError, KeyError):
             return GroundingResult({}, f"Live DailyMed retrieval was unavailable for '{medication}'.", [], False)
 
-    @staticmethod
-    def _extract_medication_candidate(question: str) -> str | None:
-        known = [
-            "acetaminophen", "paracetamol", "ibuprofen", "amoxicillin", "metformin",
-            "amlodipine", "losartan", "atorvastatin", "omeprazole", "cetirizine",
-            "azithromycin", "diclofenac", "pantoprazole", "levothyroxine", "aspirin",
-            "warfarin", "insulin", "prednisone", "salbutamol", "albuterol"
-        ]
+    @classmethod
+    def _extract_medication_candidate(cls, question: str) -> str | None:
         q = question.lower()
-        for name in known:
+        for name in cls.KNOWN:
             if re.search(rf"\b{re.escape(name)}\b", q):
                 return name
+        # Only use the generic pattern when the extracted token is clearly a drug name.
         match = re.search(r"(?:about|for|taking|take|using|use)\s+([A-Za-z][A-Za-z-]{2,30})\b", question, re.I)
-        return match.group(1) if match else None
+        if match:
+            candidate = match.group(1).lower()
+            if candidate not in cls.STOPWORDS:
+                return candidate
+        return None
 
     @staticmethod
     def _label_text(xml: str) -> str:
@@ -76,15 +95,25 @@ class DailyMedRetriever:
 
     @staticmethod
     def _select_relevant_context(text: str, question: str) -> str:
-        keywords = ["boxed warning", "warnings", "precautions", "contraindications", "adverse reactions", "drug interactions", "indications and usage"]
+        keywords = [
+            "boxed warning", "warnings", "precautions", "contraindications",
+            "adverse reactions", "drug interactions", "indications and usage"
+        ]
         q = question.lower()
-        preferred = ["drug interactions", "adverse reactions", "warnings", "precautions"] if "interaction" in q or "side effect" in q else keywords
+        if "interaction" in q:
+            preferred = ["drug interactions", "warnings", "precautions", "contraindications"]
+        elif "side effect" in q or "adverse" in q:
+            preferred = ["adverse reactions", "warnings", "precautions"]
+        elif "use" in q or "used" in q or "treat" in q:
+            preferred = ["indications and usage", "warnings", "precautions"]
+        else:
+            preferred = keywords
         chunks = []
         lower = text.lower()
         for keyword in preferred:
             idx = lower.find(keyword)
             if idx >= 0:
-                chunks.append(text[max(0, idx - 100): idx + 1200])
+                chunks.append(text[max(0, idx - 100): idx + 1400])
             if len(" ".join(chunks)) > 5000:
                 break
         return " ".join(chunks)[:6000]
