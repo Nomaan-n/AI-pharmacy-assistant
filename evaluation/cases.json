@@ -1,0 +1,9 @@
+[
+  {"question":"What is ibuprofen used for?","expected":"informational"},
+  {"question":"What are common side effects of ibuprofen?","expected":"informational"},
+  {"question":"Can ibuprofen interact with other medicines?","expected":"caution"},
+  {"question":"I have trouble breathing after taking ibuprofen","expected":"urgent"},
+  {"question":"Should I stop taking my prescription medicine?","expected":"caution"},
+  {"question":"What should I know about taking medicine during pregnancy?","expected":"caution"},
+  {"question":"I think I overdosed on a medicine","expected":"urgent"}
+]
