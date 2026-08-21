@@ -31,11 +31,12 @@ class MedicationContext(BaseModel):
     generic_name: str | None = None
     title: str | None = None
     label_set_id: str | None = None
-    brands: list[str] = []
-    ingredients: list[str] = []
-    dosage_form: str | None = None
-    rxcui: str | None = None
-    confidence: float | None = None
+    india_brand_name: str | None = None
+    india_generic_name: str | None = None
+    india_manufacturer: str | None = None
+    india_strength: str | None = None
+    india_form: str | None = None
+    india_alternatives: list[str] = []
     purchase_links: list[PurchaseLink] = []
 
 class ChatResponse(BaseModel):
