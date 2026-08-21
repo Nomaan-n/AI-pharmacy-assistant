@@ -22,11 +22,21 @@ class Safety(BaseModel):
     flags: list[str] = []
     disclaimer: str
 
+class PurchaseLink(BaseModel):
+    name: str
+    url: str
+
 class MedicationContext(BaseModel):
     name: str | None = None
     generic_name: str | None = None
     title: str | None = None
     label_set_id: str | None = None
+    brands: list[str] = []
+    ingredients: list[str] = []
+    dosage_form: str | None = None
+    rxcui: str | None = None
+    confidence: float | None = None
+    purchase_links: list[PurchaseLink] = []
 
 class ChatResponse(BaseModel):
     answer: str

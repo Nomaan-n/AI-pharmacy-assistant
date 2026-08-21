@@ -12,7 +12,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="A safety-aware medication information assistant grounded in DailyMed labeling.",
+    description="A safety-aware medication information assistant dynamically resolving medicine names and grounding facts in authoritative labeling.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -31,7 +31,7 @@ async def home():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": settings.app_version, "llm_configured": bool(settings.openai_api_key)}
+    return {"status": "ok", "version": settings.app_version, "llm_configured": bool(settings.groq_api_key)}
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
