@@ -1,136 +1,110 @@
 # AI Pharmacy Assistant
 
-A small FastAPI-based medication information API designed as a portfolio project combining pharmacy-domain knowledge with practical backend development.
+A safety-focused medication information assistant built with FastAPI, Python, grounded medication context, and an optional OpenAI LLM layer.
 
-> **Safety:** This project provides general educational information only. It is not a diagnostic tool, does not prescribe treatment, and is not a substitute for advice from a qualified doctor or pharmacist.
+## What it demonstrates
 
-## Features
-
-- REST API built with FastAPI
-- Medication lookup for a small demonstration knowledge base
-- Structured medication information including generic name, drug class, uses, common side effects, and warnings
-- Health-check endpoint
-- Input normalization and basic validation
-- Clear safety messaging for unknown medicines and every successful lookup
-- Restricted CORS methods for the demo API
-- Simple, readable Python architecture suitable for extension
-
-## Current medication knowledge base
-
-The demo currently includes:
-
-- Paracetamol
-- Ibuprofen
-- Cetirizine
-
-This is intentionally a small demonstration dataset. It should **not** be represented as a comprehensive drug database.
-
-## API endpoints
-
-### `GET /`
-
-Returns application metadata and the safety notice.
-
-### `GET /health`
-
-Returns a simple health status.
-
-### `GET /medicine/{medicine_name}`
-
-Returns information for a medicine in the demonstration knowledge base.
-
-Example:
-
-```text
-GET /medicine/paracetamol
-```
-
-Unknown medicines return a clear `found: false` response rather than inventing information.
-
-## Run locally
-
-Clone the repository and install the dependencies:
-
-```bash
-python -m venv .venv
-```
-
-Activate the environment on Windows:
-
-```bash
-.venv\Scripts\activate
-```
-
-Activate it on macOS/Linux:
-
-```bash
-source .venv/bin/activate
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Start the API:
-
-```bash
-uvicorn app.main:app --reload
-```
-
-Then open the FastAPI documentation at `/docs` on the local server.
-
-## Technology stack
-
-- Python
-- FastAPI
-- Uvicorn
-- REST API
-- CORS middleware
+- Healthcare/pharmacy domain modeling
+- LLM API integration
+- Grounded responses using a curated medication dataset
+- Safety guardrails and urgent-symptom detection
+- Structured REST API responses
+- Automated API tests
+- Environment-based configuration
+- Docker deployment
+- Simple browser frontend
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    Client[API Client] --> FastAPI[FastAPI Application]
-    FastAPI --> Validation[Input Normalization & Validation]
-    Validation --> KB[Demo Medication Knowledge Base]
-    KB --> Response[Structured JSON Response]
+  U[User] --> F[Web Frontend]
+  F --> A[FastAPI /api/chat]
+  A --> S[Safety Guardrails]
+  A --> K[Medication Knowledge Context]
+  S --> L[Optional LLM]
+  K --> L
+  L --> R[Structured Response]
+  R --> F
 ```
 
-## Why this project exists
+## Features
 
-The project explores how a pharmacy-focused application can expose structured medication information through a simple API while keeping safety and transparency in the design.
+### Medication grounding
+The assistant currently includes a small curated dataset for selected medicines. Responses expose the matching medication and its source context instead of pretending the model has a verified medical database.
 
-It demonstrates practical skills in:
+### AI layer
+When `OPENAI_API_KEY` is configured, the application uses an LLM to turn grounded context into a concise natural-language response. If the API is unavailable, the application falls back to a deterministic local response.
 
-- Healthcare-domain problem framing
-- Python backend development
-- REST API design
-- Input validation
-- Error handling
-- Documentation
-- Safety-aware healthcare software design
+### Safety layer
+The API detects several urgent and higher-risk patterns and adds safety guidance. It does not diagnose patients or provide individualized prescribing instructions.
 
-## Limitations
+## API
 
-This is a portfolio/demo project, not a clinically validated system. The medication dataset is intentionally limited and should not be used to make medical decisions.
+### `GET /health`
+Returns service health and whether an LLM key is configured.
 
-The current version does not provide clinical decision support, diagnosis, prescription recommendations, or individualized treatment plans.
+### `POST /api/chat`
+Request:
+
+```json
+{"question":"What is cetirizine used for?"}
+```
+
+Response contains:
+
+- `answer`
+- `medication`
+- `safety`
+- `source`
+- `provider`
+
+Interactive OpenAPI documentation is available at `/docs` when the server is running.
+
+## Run locally
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+uvicorn app.main:app --reload
+```
+
+On Windows, activate the virtual environment with `.venv\\Scripts\\activate`.
+
+Open `http://localhost:8000` for the frontend or `http://localhost:8000/docs` for the API documentation.
+
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Optional LLM API key |
+| `OPENAI_MODEL` | LLM model name |
+| `APP_ENV` | Environment name |
+| `ALLOWED_ORIGINS` | Comma-separated CORS origins |
+
+Never commit `.env` or API keys.
+
+## Testing
+
+```bash
+pytest -q
+```
+
+## Deployment
+
+The included `Dockerfile` and `render.yaml` provide a straightforward path to deployment on a container-capable hosting provider. Set `OPENAI_API_KEY` as a secret in the hosting dashboard rather than committing it.
+
+## Medical safety disclaimer
+
+This project is a software portfolio demonstration and an educational information tool. It is **not** a clinical decision-support system, medical device, diagnostic service, or substitute for a qualified healthcare professional. Medication information can change and should be verified against current authoritative labeling and professional guidance before clinical use.
 
 ## Future improvements
 
-Possible next steps include:
-
-- Expand the medication knowledge base using appropriately licensed and reputable data sources
-- Add automated tests
-- Add a frontend interface
-- Add source attribution for medication information
-- Add structured interaction checking using a properly licensed dataset
-- Add an LLM layer with explicit safety guardrails and grounded responses
-- Add deployment configuration and CI checks
-
-## Portfolio note
-
-This repository is intended to demonstrate responsible software development at the intersection of pharmacy knowledge and AI/automation concepts. Claims about medical accuracy or clinical validation should not be inferred from this demonstration project.
+- Expand the grounded medication catalog with a licensed/authoritative data source
+- Add retrieval-augmented generation with source-level citations
+- Add authentication and rate limiting for public deployment
+- Add conversation history with privacy controls
+- Add broader automated safety evaluations
+- Add monitoring and structured production logging

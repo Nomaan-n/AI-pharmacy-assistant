@@ -1,95 +1,83 @@
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
+
+from .config import settings
+from .llm import generate_answer
+from .medications import find_medication
+from .safety import safety_flags, safety_message
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+FRONTEND = BASE_DIR / "frontend" / "index.html"
 
 app = FastAPI(
     title="AI Pharmacy Assistant",
-    version="1.1.0",
-    description="Educational medication information API. Not a substitute for professional medical advice.",
+    description="Safety-focused medication information API with grounded medication context and optional LLM assistance.",
+    version="1.0.0",
 )
 
-# Demo API: keep CORS intentionally open for portfolio testing. A production deployment
-# should restrict allow_origins to the application's known frontend domains.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.origins,
     allow_credentials=False,
-    allow_methods=["GET"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
-SAFETY_NOTE = (
-    "This API provides general educational information only. It does not diagnose, "
-    "prescribe, or replace advice from a qualified doctor or pharmacist."
-)
 
-MEDICINES = {
-    "paracetamol": {
-        "name": "Paracetamol",
-        "generic_name": "Paracetamol (acetaminophen)",
-        "drug_class": "Analgesic and antipyretic",
-        "uses": ["Relief of mild to moderate pain", "Reduction of fever"],
-        "common_side_effects": ["Usually well tolerated at recommended doses"],
-        "warning": "Excessive dosing can cause serious liver injury. Check combination products to avoid accidentally taking more than the recommended amount.",
-    },
-    "ibuprofen": {
-        "name": "Ibuprofen",
-        "generic_name": "Ibuprofen",
-        "drug_class": "Non-steroidal anti-inflammatory drug (NSAID)",
-        "uses": ["Relief of pain", "Reduction of fever", "Reduction of inflammation"],
-        "common_side_effects": ["Indigestion", "Stomach discomfort", "Nausea"],
-        "warning": "NSAIDs may not be suitable for everyone, including some people with stomach ulcers, kidney disease, heart problems, or certain asthma histories.",
-    },
-    "cetirizine": {
-        "name": "Cetirizine",
-        "generic_name": "Cetirizine",
-        "drug_class": "Second-generation antihistamine",
-        "uses": ["Relief of allergy symptoms", "Relief of urticaria (hives) symptoms"],
-        "common_side_effects": ["Drowsiness", "Headache", "Dry mouth"],
-        "warning": "Drowsiness can occur in some people. Take care with driving or other activities requiring alertness until you know how it affects you.",
-    },
-}
+class ChatRequest(BaseModel):
+    question: str = Field(min_length=2, max_length=2000)
 
 
-def _normalize_medicine_name(medicine_name: str) -> str:
-    return " ".join(medicine_name.strip().lower().split())
+class ChatResponse(BaseModel):
+    answer: str
+    medication: dict | None
+    safety: dict
+    source: dict | None
+    provider: str
 
 
-@app.get("/")
-def root():
-    return {
-        "name": app.title,
-        "status": "running",
-        "version": app.version,
-        "safety_note": SAFETY_NOTE,
-    }
+@app.get("/", include_in_schema=False)
+def frontend():
+    if not FRONTEND.exists():
+        return {"name": "AI Pharmacy Assistant", "docs": "/docs"}
+    return FileResponse(FRONTEND)
 
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {"status": "ok", "llm_enabled": bool(settings.openai_api_key)}
 
 
-@app.get("/medicine/{medicine_name}")
-def medicine_info(medicine_name: str):
-    medicine = _normalize_medicine_name(medicine_name)
+@app.post("/api/chat", response_model=ChatResponse)
+def chat(request: ChatRequest):
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=422, detail="Question cannot be empty.")
 
-    if not medicine:
-        raise HTTPException(status_code=400, detail="Medicine name cannot be empty.")
+    medication = find_medication(question)
+    flags = safety_flags(question)
+    note = safety_message(flags)
+    answer, provider = generate_answer(question, medication, note)
 
-    if len(medicine) > 100:
-        raise HTTPException(status_code=400, detail="Medicine name is too long.")
+    source = None
+    if medication:
+        source = {"name": medication["source"], "url": medication["source_url"]}
 
-    result = MEDICINES.get(medicine)
-    if result is None:
-        return {
-            "name": medicine_name.strip(),
-            "found": False,
-            "message": "Medicine not found in the demo knowledge base.",
-            "safety_note": SAFETY_NOTE,
+    public_medication = None
+    if medication:
+        public_medication = {
+            "generic_name": medication["generic_name"],
+            "class": medication["class"],
         }
 
-    return {
-        **result,
-        "found": True,
-        "safety_note": SAFETY_NOTE,
-    }
+    return ChatResponse(
+        answer=answer,
+        medication=public_medication,
+        safety={**flags, "message": note},
+        source=source,
+        provider=provider,
+    )
