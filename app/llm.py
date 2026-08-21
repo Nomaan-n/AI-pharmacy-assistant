@@ -32,29 +32,37 @@ async def answer(question: str, context: str, safety_level: str, flags: list[str
             "deterministic-safety",
         )
 
-    if not settings.openai_api_key:
+    if not settings.groq_api_key:
         return fallback_answer(context), "deterministic-fallback"
 
     try:
+        # Groq exposes an OpenAI-compatible Responses API, so the existing
+        # OpenAI client dependency can be reused without adding a new SDK.
         from openai import AsyncOpenAI
-        client = AsyncOpenAI(api_key=settings.openai_api_key)
-        user_prompt = f"Question: {question}\nSafety level: {safety_level}\nSafety flags: {flags}\n\nGrounded DailyMed/NLM context:\n{context}"
+
+        client = AsyncOpenAI(
+            api_key=settings.groq_api_key,
+            base_url="https://api.groq.com/openai/v1",
+        )
+        user_prompt = (
+            f"Question: {question}\n"
+            f"Safety level: {safety_level}\n"
+            f"Safety flags: {flags}\n\n"
+            f"Grounded DailyMed/NLM context:\n{context}"
+        )
         response = await client.responses.create(
-            model=settings.openai_model,
-            input=[
-                {"role": "system", "content": [{"type": "input_text", "text": SYSTEM_PROMPT}]},
-                {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
-            ],
+            model=settings.groq_model,
+            input=f"SYSTEM INSTRUCTIONS:\n{SYSTEM_PROMPT}\n\nUSER REQUEST:\n{user_prompt}",
         )
         text = getattr(response, "output_text", None)
         if text:
-            return text.strip(), "openai-responses"
+            return text.strip(), "groq-responses"
     except Exception as exc:
         # Keep the public response safe, but do not hide the actual provider
         # failure from operators. Never log the API key or request contents.
         logger.exception(
-            "OpenAI Responses API request failed (model=%s, error_type=%s)",
-            settings.openai_model,
+            "Groq Responses API request failed (model=%s, error_type=%s)",
+            settings.groq_model,
             type(exc).__name__,
         )
     return fallback_answer(context), "deterministic-fallback"
