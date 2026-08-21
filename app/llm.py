@@ -1,60 +1,45 @@
-from typing import Any
+import json
+from .config import get_settings
 
-from openai import OpenAI
-
-from .config import settings
-
-SYSTEM_PROMPT = """You are a safety-focused medication information assistant.
-
-Your job is to explain medication information clearly using only the supplied grounded medication context plus general high-level knowledge when needed.
+SYSTEM_PROMPT = """You are a medication-information assistant. You are not a doctor, pharmacist, diagnostician, or emergency service.
 
 Rules:
-- Do not diagnose conditions.
-- Do not claim to be a doctor or pharmacist.
-- Do not tell a user to start, stop, or change a prescription treatment.
-- Do not invent medication facts, interactions, doses, contraindications, or sources.
-- If the supplied medication context does not contain the requested fact, say that the available source context does not establish it.
+- Answer only from the supplied grounded medication context when it is relevant.
+- Never invent drug facts, contraindications, interactions, doses, or citations.
+- Do not diagnose.
+- Do not tell a user to start, stop, increase, or decrease prescription treatment.
 - Do not provide individualized dosing instructions.
-- For emergencies, direct the user to immediate professional/emergency care.
-- Distinguish general educational information from personalized medical advice.
-- Keep answers concise and structured.
+- For urgent safety flags, prioritize immediate professional/emergency care over explanation.
+- Clearly distinguish what the source supports from what is unknown.
+- Keep answers concise, structured, and understandable.
+- If the supplied source does not contain enough information, say so.
 """
 
-
-def generate_answer(question: str, medication: dict[str, Any] | None, safety_note: str | None) -> tuple[str, str]:
+async def answer(question: str, context: str, safety_level: str, flags: list[str]) -> tuple[str, str]:
+    settings = get_settings()
     if not settings.openai_api_key:
-        return fallback_answer(question, medication, safety_note), "local-grounded"
-
-    client = OpenAI(api_key=settings.openai_api_key)
-    context = medication or {"message": "No matching medication was found in the local grounded dataset."}
-    prompt = f"Question: {question}\n\nGrounded medication context:\n{context}\n\nSafety note:\n{safety_note or 'None detected.'}"
-
+        return fallback_answer(question, context, safety_level, flags), "deterministic-fallback"
     try:
-        response = client.chat.completions.create(
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+        user_prompt = f"Question: {question}\nSafety level: {safety_level}\nSafety flags: {flags}\n\nGrounded source context:\n{context}"
+        response = await client.responses.create(
             model=settings.openai_model,
-            temperature=0.1,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+            input=[
+                {"role": "system", "content": [{"type": "input_text", "text": SYSTEM_PROMPT}]},
+                {"role": "user", "content": [{"type": "input_text", "text": user_prompt}]},
             ],
         )
-        answer = response.choices[0].message.content or "I could not generate a response."
-        return answer, "openai"
+        text = getattr(response, "output_text", None)
+        if text:
+            return text.strip(), "openai-responses"
     except Exception:
-        return fallback_answer(question, medication, safety_note), "local-grounded-fallback"
+        pass
+    return fallback_answer(question, context, safety_level, flags), "deterministic-fallback"
 
-
-def fallback_answer(question: str, medication: dict[str, Any] | None, safety_note: str | None) -> str:
-    if not medication:
-        return "I could not match that medication to the assistant's grounded medication dataset. I can provide general guidance, but I cannot safely verify a medicine-specific answer from the available sources."
-
-    lines = [
-        f"**{medication['generic_name']}** ({medication['class']})",
-        "",
-        "**Common uses:** " + "; ".join(medication["uses"]),
-        "**Common side effects:** " + "; ".join(medication["common_side_effects"]),
-        "**Important warnings:** " + "; ".join(medication["warnings"]),
-    ]
-    if safety_note:
-        lines += ["", f"**Safety:** {safety_note}"]
-    return "\n".join(lines)
+def fallback_answer(question: str, context: str, safety_level: str, flags: list[str]) -> str:
+    if safety_level == "urgent":
+        return "This question may involve an urgent medical situation. Seek prompt professional or emergency care rather than relying on this app."
+    if not context or context.startswith("No DailyMed") or context.startswith("Live DailyMed"):
+        return "I could not retrieve a reliable medication label for this question. I do not want to guess. Please provide the exact medicine name or consult a pharmacist or clinician."
+    return "I found relevant information in the medication label, but the AI explanation service is not configured. Please review the cited DailyMed label for the authoritative details."

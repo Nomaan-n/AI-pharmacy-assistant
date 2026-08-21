@@ -1,90 +1,68 @@
 # AI Pharmacy Assistant
 
-A safety-focused medication information assistant built with FastAPI, Python, grounded medication context, and an optional OpenAI LLM layer.
+A safety-aware AI medication information assistant built with FastAPI, an LLM layer, and live grounding against DailyMed labeling from the U.S. National Library of Medicine.
 
-## What it demonstrates
+## Why this project exists
 
-- Healthcare/pharmacy domain modeling
-- LLM API integration
-- Grounded responses using a curated medication dataset
-- Safety guardrails and urgent-symptom detection
-- Structured REST API responses
-- Automated API tests
-- Environment-based configuration
-- Docker deployment
-- Simple browser frontend
+Medication questions are a poor fit for an ungrounded chatbot. This project demonstrates a safer architecture: identify a medication, retrieve authoritative label context, apply deterministic safety rules, then optionally ask an LLM to explain only the supplied evidence.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  U[User] --> F[Web Frontend]
-  F --> A[FastAPI /api/chat]
-  A --> S[Safety Guardrails]
-  A --> K[Medication Knowledge Context]
-  S --> L[Optional LLM]
-  K --> L
-  L --> R[Structured Response]
-  R --> F
+  U[User] --> API[FastAPI /api/chat]
+  API --> S[Safety classifier]
+  API --> R[DailyMed retriever]
+  R --> D[DailyMed/NLM labels]
+  S --> L[LLM guardrail prompt]
+  R --> L
+  L --> O[Structured response]
+  O --> UI[Web frontend]
 ```
 
 ## Features
 
-### Medication grounding
-The assistant currently includes a small curated dataset for selected medicines. Responses expose the matching medication and its source context instead of pretending the model has a verified medical database.
+- `POST /api/chat` structured chat endpoint
+- Deterministic safety classification for urgent and higher-risk queries
+- Live DailyMed label retrieval when a medication can be identified
+- Source URLs returned with responses
+- Optional OpenAI Responses API integration
+- Safe deterministic fallback when an LLM key is absent or the model fails
+- Pydantic validation and typed API schemas
+- Automated API tests
+- Minimal browser frontend
+- Docker and Render configuration
+- Interactive OpenAPI documentation at `/docs`
 
-### AI layer
-When `OPENAI_API_KEY` is configured, the application uses an LLM to turn grounded context into a concise natural-language response. If the API is unavailable, the application falls back to a deterministic local response.
-
-### Safety layer
-The API detects several urgent and higher-risk patterns and adds safety guidance. It does not diagnose patients or provide individualized prescribing instructions.
-
-## API
-
-### `GET /health`
-Returns service health and whether an LLM key is configured.
-
-### `POST /api/chat`
-Request:
-
-```json
-{"question":"What is cetirizine used for?"}
-```
-
-Response contains:
-
-- `answer`
-- `medication`
-- `safety`
-- `source`
-- `provider`
-
-Interactive OpenAPI documentation is available at `/docs` when the server is running.
+DailyMed provides current Structured Product Label information through a REST API. The FDA also identifies DailyMed as an official place to search drug labeling. See the project documentation links below.
 
 ## Run locally
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --reload
 ```
 
-On Windows, activate the virtual environment with `.venv\\Scripts\\activate`.
+Open `http://127.0.0.1:8000` for the web UI or `http://127.0.0.1:8000/docs` for Swagger UI.
 
-Open `http://localhost:8000` for the frontend or `http://localhost:8000/docs` for the API documentation.
+An OpenAI API key is optional. Without one, the application still demonstrates retrieval, safety classification, source grounding, and deterministic fallback behavior.
 
-## Environment variables
+## Example request
 
-| Variable | Purpose |
-|---|---|
-| `OPENAI_API_KEY` | Optional LLM API key |
-| `OPENAI_MODEL` | LLM model name |
-| `APP_ENV` | Environment name |
-| `ALLOWED_ORIGINS` | Comma-separated CORS origins |
+```bash
+curl -X POST http://127.0.0.1:8000/api/chat \\
+  -H 'Content-Type: application/json' \\
+  -d '{"question":"What are common side effects of ibuprofen?"}'
+```
 
-Never commit `.env` or API keys.
+## Safety design
+
+The application does not diagnose conditions or provide individualized prescription instructions. It detects selected urgent and higher-risk contexts before the LLM runs. The LLM is explicitly instructed to avoid unsupported claims and to use only retrieved context.
+
+This is a portfolio project, not a medical device or clinically validated decision-support system.
 
 ## Testing
 
@@ -92,19 +70,22 @@ Never commit `.env` or API keys.
 pytest -q
 ```
 
+The tests cover validation, health checks, urgent-query handling, structured response shape, and grounding behavior using mocked retrieval.
+
 ## Deployment
 
-The included `Dockerfile` and `render.yaml` provide a straightforward path to deployment on a container-capable hosting provider. Set `OPENAI_API_KEY` as a secret in the hosting dashboard rather than committing it.
+A `render.yaml` and `Dockerfile` are included for deployment. The repository does not claim to be deployed until a live service is actually provisioned and tested.
 
-## Medical safety disclaimer
+## Data sources
 
-This project is a software portfolio demonstration and an educational information tool. It is **not** a clinical decision-support system, medical device, diagnostic service, or substitute for a qualified healthcare professional. Medication information can change and should be verified against current authoritative labeling and professional guidance before clinical use.
+- DailyMed/NLM: https://dailymed.nlm.nih.gov/
+- FDA drug information: https://www.fda.gov/drugs/information-consumers-and-patients-drugs/find-information-about-drug
+- FDA drug safety: https://www.fda.gov/drugs/drug-safety-and-availability
 
-## Future improvements
+## Limitations
 
-- Expand the grounded medication catalog with a licensed/authoritative data source
-- Add retrieval-augmented generation with source-level citations
-- Add authentication and rate limiting for public deployment
-- Add conversation history with privacy controls
-- Add broader automated safety evaluations
-- Add monitoring and structured production logging
+The medication identifier is intentionally conservative and the system depends on the availability of DailyMed labeling. A missing source is treated as missing evidence, not as permission for the model to guess. A production clinical system would require substantially more validation, governance, monitoring, source coverage, and regulatory review.
+
+## Portfolio value
+
+This project demonstrates practical skills across healthcare-domain reasoning, LLM integration, retrieval grounding, API design, safety guardrails, testing, documentation, and deployment packaging.

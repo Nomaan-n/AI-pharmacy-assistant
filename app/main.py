@@ -1,83 +1,49 @@
-from pathlib import Path
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from fastapi.staticfiles import StaticFiles
+from .config import get_settings
+from .grounding import DailyMedRetriever
+from .llm import answer
+from .safety import assess, DISCLAIMER, URGENT_DISCLAIMER
+from .schemas import ChatRequest, ChatResponse, MedicationContext, Safety
 
-from .config import settings
-from .llm import generate_answer
-from .medications import find_medication
-from .safety import safety_flags, safety_message
-
-BASE_DIR = Path(__file__).resolve().parent.parent
-FRONTEND = BASE_DIR / "frontend" / "index.html"
-
+settings = get_settings()
 app = FastAPI(
-    title="AI Pharmacy Assistant",
-    description="Safety-focused medication information API with grounded medication context and optional LLM assistance.",
-    version="1.0.0",
+    title=settings.app_name,
+    version=settings.app_version,
+    description="A safety-aware medication information assistant grounded in DailyMed labeling.",
 )
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.origins,
+    allow_origins=[x.strip() for x in settings.allow_origins.split(",")],
     allow_credentials=False,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["*"],
 )
 
-
-class ChatRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=2000)
-
-
-class ChatResponse(BaseModel):
-    answer: str
-    medication: dict | None
-    safety: dict
-    source: dict | None
-    provider: str
-
+retriever = DailyMedRetriever()
+app.mount("/static", StaticFiles(directory="frontend"), name="static")
 
 @app.get("/", include_in_schema=False)
-def frontend():
-    if not FRONTEND.exists():
-        return {"name": "AI Pharmacy Assistant", "docs": "/docs"}
-    return FileResponse(FRONTEND)
-
+async def home():
+    return FileResponse("frontend/index.html")
 
 @app.get("/health")
-def health():
-    return {"status": "ok", "llm_enabled": bool(settings.openai_api_key)}
-
+async def health():
+    return {"status": "ok", "version": settings.app_version, "llm_configured": bool(settings.openai_api_key)}
 
 @app.post("/api/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
-    question = request.question.strip()
-    if not question:
-        raise HTTPException(status_code=422, detail="Question cannot be empty.")
-
-    medication = find_medication(question)
-    flags = safety_flags(question)
-    note = safety_message(flags)
-    answer, provider = generate_answer(question, medication, note)
-
-    source = None
-    if medication:
-        source = {"name": medication["source"], "url": medication["source_url"]}
-
-    public_medication = None
-    if medication:
-        public_medication = {
-            "generic_name": medication["generic_name"],
-            "class": medication["class"],
-        }
-
+async def chat(request: ChatRequest):
+    level, flags = assess(request.question)
+    grounded = await retriever.retrieve(request.question)
+    answer_text, provider = await answer(request.question, grounded.context, level, flags)
+    disclaimer = URGENT_DISCLAIMER if level == "urgent" else DISCLAIMER
     return ChatResponse(
-        answer=answer,
-        medication=public_medication,
-        safety={**flags, "message": note},
-        source=source,
+        answer=answer_text,
+        medication=MedicationContext(**grounded.medication),
+        safety=Safety(level=level, flags=flags, disclaimer=disclaimer),
+        sources=grounded.sources,
+        grounded=grounded.grounded,
         provider=provider,
     )
