@@ -36,6 +36,16 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_title": "IPCA pharmaceutical formulations",
         "source_type": "Manufacturer product reference",
     },
+    "suhagra": {
+        "brand_name": "Suhagra",
+        "generic_name": "Sildenafil",
+        "manufacturer": "Cipla Ltd",
+        "strength": "Multiple strengths available; strength not specified in query",
+        "form": "oral tablet",
+        "source_url": "https://www.apollopharmacy.in/medicine/suhagra-50mg-tablet",
+        "source_title": "Apollo Pharmacy - Suhagra-50 Tablet",
+        "source_type": "Indian product reference",
+    },
     "suhagra50": {
         "brand_name": "Suhagra-50",
         "generic_name": "Sildenafil 50 mg",
