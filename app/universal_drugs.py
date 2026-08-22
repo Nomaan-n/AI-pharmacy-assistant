@@ -159,7 +159,18 @@ class UniversalDrugResolver:
             return False
         q = cls._normalize(query)
         m = cls._normalize(matched)
-        return q == m or m.startswith(q) or q in m
+        if q == m:
+            return True
+        # Allow dosage/form qualifiers around a queried generic, but never
+        # resolve a single ingredient to a combination product.
+        if not m.startswith(q):
+            return False
+        remainder = m[len(q):]
+        return not re.match(
+            r"(clavulanate|sulbactam|tazobactam|potassium|sodium|calcium|"
+            r"hydrochloride|mesylate|besylate|maleate|fumarate)",
+            remainder,
+        )
 
     @staticmethod
     def _openfda_match(query: str, field: str, brands: list[str], generics: list[str]) -> bool:
