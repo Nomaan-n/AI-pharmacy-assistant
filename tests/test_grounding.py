@@ -25,3 +25,8 @@ def test_brand_normalization_does_not_merge_different_products():
 def test_composition_normalization_is_exact():
     assert IndiaDrugRegistry.normalize_composition("aceclofenac + paracetamol + serratiopeptidase") == IndiaDrugRegistry.normalize_composition("aceclofenac paracetamol serratiopeptidase")
     assert IndiaDrugRegistry.normalize_composition("aceclofenac + drotaverine hydrochloride") != IndiaDrugRegistry.normalize_composition("aceclofenac + paracetamol + serratiopeptidase")
+
+
+def test_universal_resolver_is_available():
+    from app.universal_drugs import UniversalDrugResolver
+    assert UniversalDrugResolver is not None
