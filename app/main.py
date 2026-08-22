@@ -42,21 +42,14 @@ async def chat(request: ChatRequest):
     answer_text, provider = await answer(request.question, grounded.context, level, flags)
     medication = dict(grounded.medication)
 
-    india_alternatives: list[str] = []
-    india_query = medication.get("india_generic_name") or medication.get("generic_name") or medication.get("name")
-    if india_query:
-        matches = await india_registry.search(str(india_query), limit=8)
-        seen = set()
-        for match in matches:
-            name = match.get("brand_name")
-            if not name or name.lower() in seen:
-                continue
-            seen.add(name.lower())
-            india_alternatives.append(name)
-        original = (medication.get("india_brand_name") or "").lower()
-        india_alternatives = [x for x in india_alternatives if x.lower() != original][:5]
+    original_brand = medication.get("india_brand_name")
+    composition = medication.get("india_generic_name") or medication.get("generic_name")
+    india_alternatives = await india_registry.same_composition_brands(
+        str(composition) if composition else None,
+        exclude_brand=str(original_brand) if original_brand else None,
+    )
 
-    purchase_name = medication.get("india_brand_name") or medication.get("name") or request.question
+    purchase_name = original_brand or medication.get("name") or request.question
     medication["india_alternatives"] = india_alternatives
     medication["purchase_links"] = IndiaDrugRegistry.purchase_links(str(purchase_name))
 
