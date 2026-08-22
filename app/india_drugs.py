@@ -25,6 +25,7 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_url": "https://ipca.com/wp-content/pdf/revised-pricelist-of-all-domestic-formulations-applicable-22-09-2025.pdf",
         "source_title": "IPCA domestic formulations list",
         "source_type": "Manufacturer product reference",
+        "use_summary": "Zerodol-SP is a pain-relief combination used for short-term relief of pain and inflammation.",
     },
     "zerodolspas": {
         "brand_name": "Zerodol-Spas",
@@ -35,6 +36,7 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_url": "https://www.ipca.com/pharmaceutical-formulations-manufacturers-india/?id=pr_95",
         "source_title": "IPCA pharmaceutical formulations",
         "source_type": "Manufacturer product reference",
+        "use_summary": "Zerodol-Spas is a combination used for relief of pain associated with muscle or abdominal spasms.",
     },
     "suhagra": {
         "brand_name": "Suhagra",
@@ -45,6 +47,7 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_url": "https://www.apollopharmacy.in/medicine/suhagra-50mg-tablet",
         "source_title": "Apollo Pharmacy - Suhagra-50 Tablet",
         "source_type": "Indian product reference",
+        "use_summary": "Suhagra contains sildenafil and is primarily used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation.",
     },
     "suhagra50": {
         "brand_name": "Suhagra-50",
@@ -55,6 +58,7 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_url": "https://www.apollopharmacy.in/medicine/suhagra-50mg-tablet",
         "source_title": "Apollo Pharmacy - Suhagra-50 Tablet",
         "source_type": "Indian product reference",
+        "use_summary": "Suhagra 50 contains sildenafil and is used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation.",
     },
     "suhagra100": {
         "brand_name": "Suhagra-100",
@@ -65,6 +69,7 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_url": "https://www.apollopharmacy.in/medicine/suhagra-100mg-tablet",
         "source_title": "Apollo Pharmacy - Suhagra-100 Tablet",
         "source_type": "Indian product reference",
+        "use_summary": "Suhagra 100 contains sildenafil and is used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation.",
     },
     "augmentin625duo": {
         "brand_name": "Augmentin 625 Duo",
@@ -75,6 +80,7 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_url": "https://india-pharma.gsk.com/media/6335/augmentin-duo-tablets.pdf",
         "source_title": "GSK India - Augmentin Duo prescribing information",
         "source_type": "Manufacturer product reference",
+        "use_summary": "Augmentin 625 Duo is an antibiotic used to treat susceptible bacterial infections. It combines amoxicillin with clavulanic acid to broaden antibacterial coverage.",
     },
     "augmentin1gduo": {
         "brand_name": "Augmentin 1g Duo",
@@ -85,6 +91,7 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "source_url": "https://india-pharma.gsk.com/media/6335/augmentin-duo-tablets.pdf",
         "source_title": "GSK India - Augmentin Duo prescribing information",
         "source_type": "Manufacturer product reference",
+        "use_summary": "Augmentin 1g Duo is an antibiotic used to treat susceptible bacterial infections. It combines amoxicillin with clavulanic acid to broaden antibacterial coverage.",
     },
 }
 

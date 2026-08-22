@@ -26,6 +26,7 @@ class DailyMedRetriever:
             "source_url": "https://www.cipla.com/",
             "source_title": "Cipla - Suhagra product family",
             "source_type": "Indian manufacturer reference",
+            "use_summary": "Suhagra contains sildenafil and is primarily used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation.",
         },
         "suhagra50": {
             "brand_name": "Suhagra 50",
@@ -36,6 +37,7 @@ class DailyMedRetriever:
             "source_url": "https://www.apollopharmacy.in/medicine/suhagra-50mg-tablet",
             "source_title": "Suhagra-50 Tablet - Apollo Pharmacy",
             "source_type": "Indian product reference",
+            "use_summary": "Suhagra 50 contains sildenafil and is used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation.",
         },
         "suhagra100": {
             "brand_name": "Suhagra 100",
@@ -46,6 +48,7 @@ class DailyMedRetriever:
             "source_url": "https://www.cipla.com/",
             "source_title": "Cipla - Suhagra product family",
             "source_type": "Indian manufacturer reference",
+            "use_summary": "Suhagra 100 contains sildenafil and is used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation.",
         },
         "zerodolsp": {
             "brand_name": "Zerodol-SP",
@@ -56,6 +59,7 @@ class DailyMedRetriever:
             "source_url": "https://www.ipca.com/",
             "source_title": "Ipca Laboratories - Zerodol product family",
             "source_type": "Indian manufacturer reference",
+            "use_summary": "Zerodol-SP is a pain-relief combination used for short-term relief of pain and inflammation.",
         },
         "zerodolspas": {
             "brand_name": "Zerodol-Spas",
@@ -66,9 +70,9 @@ class DailyMedRetriever:
             "source_url": "https://www.ipca.com/",
             "source_title": "Ipca Laboratories - Zerodol product family",
             "source_type": "Indian manufacturer reference",
+            "use_summary": "Zerodol-Spas is a combination used for relief of pain associated with muscle or abdominal spasms.",
         },
     }
-
     KNOWN = {
         "acetaminophen", "paracetamol", "ibuprofen", "amoxicillin", "metformin",
         "amlodipine", "losartan", "atorvastatin", "omeprazole", "cetirizine",
@@ -252,6 +256,9 @@ class DailyMedRetriever:
             parts.append(f"Manufacturer: {manufacturer}.")
         if strength or form:
             parts.append(f"Strength/form: {(strength or '').strip()} {(form or '').strip()}.".strip())
+        use_summary = row.get("use_summary")
+        if use_summary:
+            parts.append(f"Verified use summary: {use_summary}")
         parts.append("This identifies the medicine product; clinical use should be based on the supplied authoritative label or reference.")
         return " ".join(parts)
 

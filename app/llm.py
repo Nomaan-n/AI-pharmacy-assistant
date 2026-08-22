@@ -21,6 +21,7 @@ OUTPUT RULES ARE STRICT:
 - Never diagnose or give individualized treatment advice.
 - Never tell a user to start, stop, increase, or decrease prescription treatment.
 - If the source context is insufficient, say so instead of guessing.
+- If the supplied context contains a "Verified use summary", use that summary directly for a simple "what does it do?" question. Do not refuse merely because a DailyMed label is unavailable.
 - Write naturally for a phone screen.
 
 IMPORTANT: For a simple "What does it do?" question, do not turn the answer into a mini drug monograph. The user wants a quick explanation, not the full label.
@@ -63,7 +64,14 @@ async def answer(question: str, context: str, safety_level: str, flags: list[str
         )
         text = getattr(response, "output_text", None)
         if text:
-            return compact_answer(text.strip(), question), "groq-responses"
+            compacted = compact_answer(text.strip(), question)
+            # If the model ignores a verified product-use summary and claims it
+            # has no information, use the deterministic summary instead.
+            if re.search(r"\b(i (?:don't|do not) have|couldn['’]t find|no information|unable to provide)\b", compacted, re.I):
+                deterministic = fallback_answer(context)
+                if deterministic and not deterministic.startswith("I retrieved verified"):
+                    return deterministic, "deterministic-product-summary"
+            return compacted, "groq-responses"
     except Exception as exc:
         logger.exception(
             "Groq Responses API request failed (model=%s, error_type=%s)",
@@ -102,6 +110,12 @@ def compact_answer(text: str, question: str) -> str:
 
 
 def fallback_answer(context: str) -> str:
-    if not context or context.startswith("No DailyMed") or context.startswith("Live DailyMed") or context.startswith("No specific"):
-        return "I could not retrieve enough reliable medication-label information to answer safely. Please provide the exact medicine name or consult a pharmacist or clinician."
-    return "I retrieved relevant verified medication information, but the AI explanation service is temporarily unavailable. Please open the cited source for the authoritative details."
+    if not context or context.startswith("No specific"):
+        return "I could not retrieve enough reliable medication information to answer safely. Please provide the exact medicine name."
+
+    match = re.search(r"Verified use summary:\s*(.+?)(?:\s+This identifies the medicine product|$)", context, flags=re.IGNORECASE)
+    if match:
+        summary = match.group(1).strip()
+        return summary
+
+    return "I retrieved verified medication information, but the explanation service is temporarily unavailable. Please open the cited source for the authoritative details."
