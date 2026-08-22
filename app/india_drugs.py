@@ -12,9 +12,9 @@ from .config import get_settings
 logger = logging.getLogger(__name__)
 
 
-# High-confidence brand identities used as a fallback when the upstream Indian
-# registry search ranks a near-match (for example Zerodol Spas) above the exact
-# requested brand. These entries are identification data, not prescribing data.
+# High-confidence Indian brand identities. These records are identification
+# data only, not prescribing data. Exact matching is intentionally strict so a
+# similarly named brand cannot silently replace the requested product.
 KNOWN_BRANDS: dict[str, dict[str, str]] = {
     "zerodolsp": {
         "brand_name": "Zerodol-SP",
@@ -22,14 +22,86 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
         "manufacturer": "Ipca Laboratories Ltd",
         "strength": "100 mg + 325 mg + 15 mg",
         "form": "oral tablet",
+        "source_url": "https://ipca.com/wp-content/pdf/revised-pricelist-of-all-domestic-formulations-applicable-22-09-2025.pdf",
+        "source_title": "IPCA domestic formulations list",
+        "source_type": "Manufacturer product reference",
     },
+    "zerodolspas": {
+        "brand_name": "Zerodol-Spas",
+        "generic_name": "Drotaverine + Aceclofenac",
+        "manufacturer": "Ipca Laboratories Ltd",
+        "strength": "100 mg + 80 mg",
+        "form": "oral tablet",
+        "source_url": "https://www.ipca.com/pharmaceutical-formulations-manufacturers-india/?id=pr_95",
+        "source_title": "IPCA pharmaceutical formulations",
+        "source_type": "Manufacturer product reference",
+    },
+    "suhagra50": {
+        "brand_name": "Suhagra-50",
+        "generic_name": "Sildenafil 50 mg",
+        "manufacturer": "Cipla Ltd",
+        "strength": "50 mg",
+        "form": "oral tablet",
+        "source_url": "https://www.apollopharmacy.in/medicine/suhagra-50mg-tablet",
+        "source_title": "Apollo Pharmacy - Suhagra-50 Tablet",
+        "source_type": "Indian product reference",
+    },
+    "suhagra100": {
+        "brand_name": "Suhagra-100",
+        "generic_name": "Sildenafil 100 mg",
+        "manufacturer": "Cipla Ltd",
+        "strength": "100 mg",
+        "form": "oral tablet",
+        "source_url": "https://www.apollopharmacy.in/medicine/suhagra-100mg-tablet",
+        "source_title": "Apollo Pharmacy - Suhagra-100 Tablet",
+        "source_type": "Indian product reference",
+    },
+    "augmentin625duo": {
+        "brand_name": "Augmentin 625 Duo",
+        "generic_name": "Amoxycillin 500 mg + Clavulanic Acid 125 mg",
+        "manufacturer": "GSK India",
+        "strength": "500 mg + 125 mg",
+        "form": "film-coated tablet",
+        "source_url": "https://india-pharma.gsk.com/media/6335/augmentin-duo-tablets.pdf",
+        "source_title": "GSK India - Augmentin Duo prescribing information",
+        "source_type": "Manufacturer product reference",
+    },
+    "augmentin1gduo": {
+        "brand_name": "Augmentin 1g Duo",
+        "generic_name": "Amoxycillin 875 mg + Clavulanic Acid 125 mg",
+        "manufacturer": "GSK India",
+        "strength": "875 mg + 125 mg",
+        "form": "film-coated tablet",
+        "source_url": "https://india-pharma.gsk.com/media/6335/augmentin-duo-tablets.pdf",
+        "source_title": "GSK India - Augmentin Duo prescribing information",
+        "source_type": "Manufacturer product reference",
+    },
+}
+
+# Unambiguous spelling/strength aliases only. These never map one strength or
+# formulation to another product.
+BRAND_ALIASES: dict[str, str] = {
+    "zerodolsp10032515": "zerodolsp",
+    "zerodolsp10032515mg": "zerodolsp",
+    "zerodolspas": "zerodolspas",
+    "zerodolspas10080": "zerodolspas",
+    "zerodolspas10080mg": "zerodolspas",
+    "suhagra50mg": "suhagra50",
+    "suhagra50mgtablet": "suhagra50",
+    "suhagra100mg": "suhagra100",
+    "suhagra100mgtablet": "suhagra100",
+    "augmentin625": "augmentin625duo",
+    "augmentin625mg": "augmentin625duo",
+    "augmentin625duotablet": "augmentin625duo",
+    "augmentin1g": "augmentin1gduo",
+    "augmentin1gduotablet": "augmentin1gduo",
 }
 
 
 class IndiaDrugRegistry:
     """Best-effort resolver for Indian branded medicines.
 
-    The registry is used for product identification, not for clinical claims.
+    The registry is used for product identification, not clinical claims.
     Brand matching is deliberately strict: a near-match such as "Zerodol Spas"
     must never be presented as the requested "Zerodol-SP".
     """
@@ -65,9 +137,8 @@ class IndiaDrugRegistry:
             if self.normalize_brand(match.get("brand_name")) == query_key:
                 return match
 
-        # Do not fall through to a fuzzy result. If the upstream registry misses
-        # a known exact brand, use only a vetted identity record.
-        known = KNOWN_BRANDS.get(query_key)
+        canonical_key = BRAND_ALIASES.get(query_key, query_key)
+        known = KNOWN_BRANDS.get(canonical_key)
         if known:
             return dict(known)
         return None

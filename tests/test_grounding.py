@@ -29,3 +29,18 @@ def test_openfda_matching_is_exact_for_identity():
 
     assert UniversalDrugResolver._openfda_match("amoxicillin", "generic_name", ["Some Brand"], ["amoxicillin"])
     assert not UniversalDrugResolver._openfda_match("amoxicillin", "generic_name", ["Some Brand"], ["amoxicillin clavulanate"])
+
+
+def test_known_indian_brands_are_exact_and_distinct():
+    assert IndiaDrugRegistry.normalize_brand("Zerodol-SP") != IndiaDrugRegistry.normalize_brand("Zerodol-Spas")
+    assert IndiaDrugRegistry.normalize_brand("Suhagra-50") == IndiaDrugRegistry.normalize_brand("Suhagra 50")
+    assert IndiaDrugRegistry.normalize_brand("Augmentin 625 Duo") != IndiaDrugRegistry.normalize_brand("Augmentin 1g Duo")
+
+
+def test_brand_aliases_keep_strengths_separate():
+    from app.india_drugs import BRAND_ALIASES
+    assert BRAND_ALIASES["zerodolspas"] == "zerodolspas"
+    assert BRAND_ALIASES["suhagra50mg"] == "suhagra50"
+    assert BRAND_ALIASES["suhagra100mg"] == "suhagra100"
+    assert BRAND_ALIASES["augmentin625"] == "augmentin625duo"
+    assert BRAND_ALIASES["augmentin1g"] == "augmentin1gduo"
