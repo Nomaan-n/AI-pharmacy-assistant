@@ -33,7 +33,13 @@ class DailyMedRetriever:
 
     async def retrieve(self, question: str) -> GroundingResult:
         medication = self._extract_medication_candidate(question)
-        india_matches = await self.india.search(medication) if medication else []
+        india_matches = []
+        exact_brand = await self.india.exact_brand(medication) if medication else None
+        if exact_brand:
+            india_matches = [exact_brand]
+        elif medication:
+            india_matches = await self.india.search(medication)
+
         india_context = {}
         if india_matches:
             best = india_matches[0]
