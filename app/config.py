@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "AI Pharmacy Assistant"
-    app_version: str = "2.1.0"
+    app_version: str = "2.2.0"
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-20b"
     daily_med_base_url: str = "https://dailymed.nlm.nih.gov/dailymed/services/v2"
