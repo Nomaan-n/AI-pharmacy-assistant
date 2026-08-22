@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 from urllib.parse import quote_plus
 
@@ -14,9 +15,9 @@ logger = logging.getLogger(__name__)
 class IndiaDrugRegistry:
     """Best-effort resolver for Indian branded medicines.
 
-    Uses the NRCeS/C-DAC Common Drug Codes for India service exposed by
-    drugdb.in for identification and composition. Clinical claims remain
-    grounded in authoritative labeling.
+    The registry is used for product identification, not for clinical claims.
+    Brand matching is deliberately strict: a near-match such as "Zerodol Spas"
+    must never be presented as the requested "Zerodol-SP".
     """
 
     def __init__(self) -> None:
@@ -39,6 +40,52 @@ class IndiaDrugRegistry:
             logger.warning("India drug registry lookup failed: %s", type(exc).__name__)
             return []
 
+    async def exact_brand(self, query: str | None, limit: int = 12) -> dict[str, Any] | None:
+        """Return a product only when its registered brand exactly matches query."""
+        query_key = self.normalize_brand(query)
+        if not query_key:
+            return None
+        matches = await self.search(query, limit=limit)
+        for match in matches:
+            if self.normalize_brand(match.get("brand_name")) == query_key:
+                return match
+        return None
+
+    async def same_composition_brands(
+        self,
+        generic_name: str | None,
+        exclude_brand: str | None = None,
+        limit: int = 20,
+    ) -> list[str]:
+        """Return only registry brands with the same normalized composition.
+
+        This is an identification list. It is intentionally not a therapeutic
+        substitution engine. Exact composition text is required so products
+        with a different salt, such as Zerodol Spas, are excluded.
+        """
+        if not generic_name:
+            return []
+        matches = await self.search(generic_name, limit=limit)
+        target = self.normalize_composition(generic_name)
+        excluded = self.normalize_brand(exclude_brand)
+        result: list[str] = []
+        seen: set[str] = set()
+        for match in matches:
+            brand = str(match.get("brand_name") or "").strip()
+            composition = str(match.get("generic_name") or "").strip()
+            if not brand or not composition:
+                continue
+            if self.normalize_composition(composition) != target:
+                continue
+            brand_key = self.normalize_brand(brand)
+            if not brand_key or brand_key == excluded or brand_key in seen:
+                continue
+            seen.add(brand_key)
+            result.append(brand)
+            if len(result) >= 8:
+                break
+        return result
+
     async def lookup_medicine(self, sct_id: str) -> dict[str, Any] | None:
         if not sct_id:
             return None
@@ -50,6 +97,17 @@ class IndiaDrugRegistry:
             return self._normalize_detail(payload)
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             return None
+
+    @staticmethod
+    def normalize_brand(value: Any) -> str:
+        return re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+
+    @staticmethod
+    def normalize_composition(value: Any) -> str:
+        value = str(value or "").lower()
+        value = re.sub(r"\s+", "", value)
+        value = re.sub(r"[^a-z0-9]+", "", value)
+        return value
 
     @staticmethod
     def _normalize_search(payload: Any) -> list[dict[str, Any]]:
