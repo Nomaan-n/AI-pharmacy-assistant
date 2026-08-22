@@ -33,24 +33,22 @@ class DailyMedRetriever:
 
     async def retrieve(self, question: str) -> GroundingResult:
         medication = self._extract_medication_candidate(question)
-        india_matches = []
+        india_context = {}
         exact_brand = await self.india.exact_brand(medication) if medication else None
         if exact_brand:
-            india_matches = [exact_brand]
-        elif medication:
-            india_matches = await self.india.search(medication)
-
-        india_context = {}
-        if india_matches:
-            best = india_matches[0]
-            india_context = {
-                "india_brand_name": best.get("brand_name"),
-                "india_generic_name": best.get("generic_name"),
-                "india_manufacturer": best.get("manufacturer"),
-                "india_strength": best.get("strength"),
-                "india_form": best.get("form"),
-            }
+            best = exact_brand
+            india_context = self._india_context(best)
             medication = best.get("generic_name") or medication
+        elif medication and medication in self.KNOWN:
+            matches = await self.india.search(medication)
+            best = matches[0] if matches else None
+            if best:
+                india_context = self._india_context(best)
+                medication = best.get("generic_name") or medication
+        elif medication:
+            # A user-entered brand that is not an exact registry match must not
+            # silently become a different nearby brand.
+            medication = medication
 
         if not medication:
             return GroundingResult(
@@ -93,6 +91,16 @@ class DailyMedRetriever:
                 )
         except (httpx.HTTPError, ValueError, KeyError):
             return GroundingResult({"name": medication, **india_context}, f"Live DailyMed retrieval was unavailable for '{medication}'.", [], False)
+
+    @staticmethod
+    def _india_context(row: dict) -> dict:
+        return {
+            "india_brand_name": row.get("brand_name"),
+            "india_generic_name": row.get("generic_name"),
+            "india_manufacturer": row.get("manufacturer"),
+            "india_strength": row.get("strength"),
+            "india_form": row.get("form"),
+        }
 
     @classmethod
     def _extract_medication_candidate(cls, question: str) -> str | None:
