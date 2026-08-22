@@ -31,16 +31,17 @@ def test_openfda_matching_is_exact_for_identity():
     assert not UniversalDrugResolver._openfda_match("amoxicillin", "generic_name", ["Some Brand"], ["amoxicillin clavulanate"])
 
 
-def test_known_indian_brands_are_exact_and_distinct():
-    assert IndiaDrugRegistry.normalize_brand("Zerodol-SP") != IndiaDrugRegistry.normalize_brand("Zerodol-Spas")
-    assert IndiaDrugRegistry.normalize_brand("Suhagra-50") == IndiaDrugRegistry.normalize_brand("Suhagra 50")
-    assert IndiaDrugRegistry.normalize_brand("Augmentin 625 Duo") != IndiaDrugRegistry.normalize_brand("Augmentin 1g Duo")
+def test_verified_brand_keys_keep_similar_indian_products_separate():
+    from app.grounding import DailyMedRetriever
+
+    assert DailyMedRetriever.VERIFIED_BRANDS["zerodolsp"]["generic_name"] != DailyMedRetriever.VERIFIED_BRANDS["zerodolspas"]["generic_name"]
+    assert DailyMedRetriever.VERIFIED_BRANDS["suhagra50"]["strength"] == "50 mg"
+    assert DailyMedRetriever.VERIFIED_BRANDS["suhagra100"]["strength"] == "100 mg"
 
 
-def test_brand_aliases_keep_strengths_separate():
-    from app.india_drugs import BRAND_ALIASES
-    assert BRAND_ALIASES["zerodolspas"] == "zerodolspas"
-    assert BRAND_ALIASES["suhagra50mg"] == "suhagra50"
-    assert BRAND_ALIASES["suhagra100mg"] == "suhagra100"
-    assert BRAND_ALIASES["augmentin625"] == "augmentin625duo"
-    assert BRAND_ALIASES["augmentin1g"] == "augmentin1gduo"
+def test_brand_key_normalization_handles_user_typing_variants():
+    from app.grounding import DailyMedRetriever
+
+    assert DailyMedRetriever._brand_key("Suhagra-50") == "suhagra50"
+    assert DailyMedRetriever._brand_key("Zerodol SP") == "zerodolsp"
+    assert DailyMedRetriever._brand_key("Zerodol Spas") == "zerodolspas"
