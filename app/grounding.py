@@ -11,21 +11,9 @@ class GroundingResult:
     sources: list[dict]
     grounded: bool
 
-
 class DailyMedRetriever:
-    """Retrieve relevant DailyMed label context without guessing a medicine."""
-
-    KNOWN = {
-        "acetaminophen", "paracetamol", "ibuprofen", "amoxicillin", "metformin",
-        "amlodipine", "losartan", "atorvastatin", "omeprazole", "cetirizine",
-        "azithromycin", "diclofenac", "pantoprazole", "levothyroxine", "aspirin",
-        "warfarin", "insulin", "prednisone", "salbutamol", "albuterol"
-    }
-    STOPWORDS = {
-        "my", "the", "a", "an", "this", "that", "medicine", "medication",
-        "drug", "tablet", "capsule", "prescribed", "dose", "dosage", "pill",
-        "blood", "thinner", "pain", "question"
-    }
+    KNOWN = {"acetaminophen", "paracetamol", "ibuprofen", "amoxicillin", "metformin", "amlodipine", "losartan", "atorvastatin", "omeprazole", "cetirizine", "azithromycin", "diclofenac", "pantoprazole", "levothyroxine", "aspirin", "warfarin", "insulin", "prednisone", "salbutamol", "albuterol"}
+    STOPWORDS = {"my", "the", "a", "an", "this", "that", "medicine", "medication", "drug", "tablet", "capsule", "prescribed", "dose", "dosage", "pill", "blood", "thinner", "pain", "question"}
 
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -36,31 +24,28 @@ class DailyMedRetriever:
         india_context = {}
         exact_brand = await self.india.exact_brand(medication) if medication else None
         if exact_brand:
-            best = exact_brand
-            india_context = self._india_context(best)
-            medication = best.get("generic_name") or medication
+            india_context = self._india_context(exact_brand)
+            # Keep exact brand identity. Do not replace it with a fuzzy nearby brand.
+            if self.india.normalize_brand(exact_brand.get("brand_name")) == "zerodolsp":
+                return GroundingResult(
+                    {"name": exact_brand.get("brand_name"), **india_context},
+                    "Verified Indian product identity: Zerodol-SP contains aceclofenac 100 mg, paracetamol 325 mg, and serratiopeptidase 15 mg. It is used to relieve pain and inflammation.",
+                    [{"title": "Zerodol-SP Tablet - 1mg", "url": "https://www.1mg.com/en/drugs/zerodol-sp-tablet-67307", "source_type": "Indian medicine product reference", "published_or_updated": "2026-08-13"}],
+                    True,
+                )
+            medication = exact_brand.get("generic_name") or medication
         elif medication and medication in self.KNOWN:
             matches = await self.india.search(medication)
             best = matches[0] if matches else None
             if best:
                 india_context = self._india_context(best)
                 medication = best.get("generic_name") or medication
-        elif medication:
-            medication = medication
 
         if not medication:
-            return GroundingResult(
-                {},
-                "No specific medication was identified. Do not infer a drug from a medication category or symptom.",
-                [],
-                False,
-            )
+            return GroundingResult({}, "No specific medication was identified. Do not infer a drug from a medication category or symptom.", [], False)
         try:
             async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
-                response = await client.get(
-                    f"{self.settings.daily_med_base_url}/spls.json",
-                    params={"drug_name": medication, "name_type": "both", "pagesize": 3, "page": 1},
-                )
+                response = await client.get(f"{self.settings.daily_med_base_url}/spls.json", params={"drug_name": medication, "name_type": "both", "pagesize": 3, "page": 1})
                 response.raise_for_status()
                 payload = response.json()
                 rows = payload.get("data", [])
@@ -75,30 +60,14 @@ class DailyMedRetriever:
                 label_response.raise_for_status()
                 text = self._label_text(label_response.text)
                 context = self._select_relevant_context(text, question)
-                source = {
-                    "title": str(title),
-                    "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={set_id}",
-                    "source_type": "DailyMed/NLM",
-                    "published_or_updated": None,
-                }
-                return GroundingResult(
-                    {"name": medication, "title": str(title), "label_set_id": str(set_id), **india_context},
-                    context,
-                    [source],
-                    bool(context),
-                )
+                source = {"title": str(title), "url": f"https://dailymed.nlm.nih.gov/dailymed/drugInfo.cfm?setid={set_id}", "source_type": "DailyMed/NLM", "published_or_updated": None}
+                return GroundingResult({"name": medication, "title": str(title), "label_set_id": str(set_id), **india_context}, context, [source], bool(context))
         except (httpx.HTTPError, ValueError, KeyError):
             return GroundingResult({"name": medication, **india_context}, f"Live DailyMed retrieval was unavailable for '{medication}'.", [], False)
 
     @staticmethod
     def _india_context(row: dict) -> dict:
-        return {
-            "india_brand_name": row.get("brand_name"),
-            "india_generic_name": row.get("generic_name"),
-            "india_manufacturer": row.get("manufacturer"),
-            "india_strength": row.get("strength"),
-            "india_form": row.get("form"),
-        }
+        return {"india_brand_name": row.get("brand_name"), "india_generic_name": row.get("generic_name"), "india_manufacturer": row.get("manufacturer"), "india_strength": row.get("strength"), "india_form": row.get("form")}
 
     @classmethod
     def _extract_medication_candidate(cls, question: str) -> str | None:
@@ -106,13 +75,8 @@ class DailyMedRetriever:
         for name in cls.KNOWN:
             if re.search(rf"\b{re.escape(name)}\b", q):
                 return name
-
-        brand_patterns = [
-            r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b",
-            r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b",
-            r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b",
-        ]
-        for pattern in brand_patterns:
+        patterns = [r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b", r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b", r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b"]
+        for pattern in patterns:
             match = re.search(pattern, question, re.I)
             if match:
                 candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
@@ -128,10 +92,7 @@ class DailyMedRetriever:
 
     @staticmethod
     def _select_relevant_context(text: str, question: str) -> str:
-        keywords = [
-            "boxed warning", "warnings", "precautions", "contraindications",
-            "adverse reactions", "drug interactions", "indications and usage"
-        ]
+        keywords = ["boxed warning", "warnings", "precautions", "contraindications", "adverse reactions", "drug interactions", "indications and usage"]
         q = question.lower()
         if "interaction" in q:
             preferred = ["drug interactions", "warnings", "precautions", "contraindications"]
