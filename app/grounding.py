@@ -17,6 +17,16 @@ class DailyMedRetriever:
     """Resolve medicines dynamically, then ground clinical facts in trusted labels."""
 
     VERIFIED_BRANDS = {
+        "suhagra": {
+            "brand_name": "Suhagra",
+            "generic_name": "Sildenafil",
+            "manufacturer": "Cipla Ltd",
+            "strength": "Multiple strengths; strength not specified in query",
+            "form": "oral tablet",
+            "source_url": "https://www.cipla.com/",
+            "source_title": "Cipla - Suhagra product family",
+            "source_type": "Indian manufacturer reference",
+        },
         "suhagra50": {
             "brand_name": "Suhagra 50",
             "generic_name": "Sildenafil 50 mg",
@@ -27,10 +37,38 @@ class DailyMedRetriever:
             "source_title": "Suhagra-50 Tablet - Apollo Pharmacy",
             "source_type": "Indian product reference",
         },
+        "suhagra100": {
+            "brand_name": "Suhagra 100",
+            "generic_name": "Sildenafil 100 mg",
+            "manufacturer": "Cipla Ltd",
+            "strength": "100 mg",
+            "form": "oral tablet",
+            "source_url": "https://www.cipla.com/",
+            "source_title": "Cipla - Suhagra product family",
+            "source_type": "Indian manufacturer reference",
+        },
+        "zerodolsp": {
+            "brand_name": "Zerodol-SP",
+            "generic_name": "Aceclofenac 100 mg + Paracetamol 325 mg + Serratiopeptidase 15 mg",
+            "manufacturer": "Ipca Laboratories Ltd",
+            "strength": "100 mg + 325 mg + 15 mg",
+            "form": "oral tablet",
+            "source_url": "https://www.ipca.com/",
+            "source_title": "Ipca Laboratories - Zerodol product family",
+            "source_type": "Indian manufacturer reference",
+        },
+        "zerodolspas": {
+            "brand_name": "Zerodol-Spas",
+            "generic_name": "Aceclofenac 100 mg + Drotaverine Hydrochloride 80 mg",
+            "manufacturer": "Ipca Laboratories Ltd",
+            "strength": "100 mg + 80 mg",
+            "form": "oral tablet",
+            "source_url": "https://www.ipca.com/",
+            "source_title": "Ipca Laboratories - Zerodol product family",
+            "source_type": "Indian manufacturer reference",
+        },
     }
 
-    # Kept only as a fast path for common generic names. Coverage no longer
-    # depends on this list because UniversalDrugResolver queries live sources.
     KNOWN = {
         "acetaminophen", "paracetamol", "ibuprofen", "amoxicillin", "metformin",
         "amlodipine", "losartan", "atorvastatin", "omeprazole", "cetirizine",
@@ -58,8 +96,6 @@ class DailyMedRetriever:
                 False,
             )
 
-        # Exact verified product first. This is deliberately before any fuzzy
-        # resolver so a brand cannot silently become a similarly named product.
         verified = self.VERIFIED_BRANDS.get(self._brand_key(query))
         product = dict(verified) if verified else None
         if not product:
@@ -74,13 +110,19 @@ class DailyMedRetriever:
 
         product_source = self._product_source(product)
 
-        # Once a product/ingredient is identified, retrieve the most relevant
-        # DailyMed label as the clinical grounding layer. Product identity and
-        # label facts are kept separate so an Indian brand is not confused with
-        # a different brand carrying a similar name.
         label_result = await self._dailymed(medication_name, question)
         if label_result:
             medication, context, source = label_result
+            merged = {"name": query, **india_context, **medication}
+            sources = ([product_source] if product_source else []) + [source]
+            return GroundingResult(merged, context, sources, True)
+
+        # DailyMed does not cover every marketed product/ingredient. Fall back
+        # to the FDA structured label API for clinical indication text, while
+        # keeping the Indian product identity separate from the clinical label.
+        fda_result = await self._openfda(medication_name, question)
+        if fda_result:
+            medication, context, source = fda_result
             merged = {"name": query, **india_context, **medication}
             sources = ([product_source] if product_source else []) + [source]
             return GroundingResult(merged, context, sources, True)
@@ -132,6 +174,51 @@ class DailyMedRetriever:
                 return ({"title": str(title), "label_set_id": str(set_id)}, context, source)
         except (httpx.HTTPError, ValueError, KeyError, TypeError):
             return None
+
+    async def _openfda(self, medication: str, question: str) -> tuple[dict, str, dict] | None:
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
+                escaped = medication.replace('"', '\\"')
+                searches = [
+                    f'openfda.generic_name:"{escaped}"',
+                    f'openfda.brand_name:"{escaped}"',
+                    f'openfda.substance_name:"{escaped}"',
+                ]
+                for search in searches:
+                    response = await client.get(
+                        "https://api.fda.gov/drug/label.json",
+                        params={"search": search, "limit": 5},
+                    )
+                    if response.status_code == 404:
+                        continue
+                    response.raise_for_status()
+                    rows = response.json().get("results", []) or []
+                    for row in rows:
+                        section = row.get("indications_and_usage") or row.get("purpose") or row.get("description") or []
+                        if isinstance(section, list):
+                            section = " ".join(str(x) for x in section)
+                        section = re.sub(r"\s+", " ", str(section)).strip()
+                        if not section:
+                            continue
+                        context = self._select_relevant_context("INDICATIONS AND USAGE " + section, question)
+                        if not context:
+                            context = section[:5000]
+                        openfda = row.get("openfda", {}) or {}
+                        brand = (openfda.get("brand_name") or [None])[0]
+                        generic = (openfda.get("generic_name") or openfda.get("substance_name") or [None])[0]
+                        return (
+                            {"title": str(brand or generic or medication), "label_source": "openFDA"},
+                            context,
+                            {
+                                "title": f"openFDA drug label: {brand or generic or medication}",
+                                "url": "https://open.fda.gov/apis/drug/label/",
+                                "source_type": "openFDA",
+                                "published_or_updated": None,
+                            },
+                        )
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return None
+        return None
 
     @staticmethod
     def _product_source(row: dict | None) -> dict | None:
