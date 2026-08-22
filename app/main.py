@@ -49,9 +49,12 @@ async def chat(request: ChatRequest):
         exclude_brand=str(original_brand) if original_brand else None,
     )
 
-    purchase_name = original_brand or medication.get("name") or request.question
+    # Only show purchase links when the product identity is known. Never turn
+    # an unresolved user query into generic shopping links.
     medication["india_alternatives"] = india_alternatives
-    medication["purchase_links"] = IndiaDrugRegistry.purchase_links(str(purchase_name))
+    medication["purchase_links"] = (
+        IndiaDrugRegistry.purchase_links(str(original_brand)) if original_brand else []
+    )
 
     disclaimer = URGENT_DISCLAIMER if level == "urgent" else DISCLAIMER
     return ChatResponse(
