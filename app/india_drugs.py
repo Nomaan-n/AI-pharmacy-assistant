@@ -12,6 +12,20 @@ from .config import get_settings
 logger = logging.getLogger(__name__)
 
 
+# High-confidence brand identities used as a fallback when the upstream Indian
+# registry search ranks a near-match (for example Zerodol Spas) above the exact
+# requested brand. These entries are identification data, not prescribing data.
+KNOWN_BRANDS: dict[str, dict[str, str]] = {
+    "zerodolsp": {
+        "brand_name": "Zerodol-SP",
+        "generic_name": "Aceclofenac 100 mg + Paracetamol 325 mg + Serratiopeptidase 15 mg",
+        "manufacturer": "Ipca Laboratories Ltd",
+        "strength": "100 mg + 325 mg + 15 mg",
+        "form": "oral tablet",
+    },
+}
+
+
 class IndiaDrugRegistry:
     """Best-effort resolver for Indian branded medicines.
 
@@ -45,10 +59,17 @@ class IndiaDrugRegistry:
         query_key = self.normalize_brand(query)
         if not query_key:
             return None
+
         matches = await self.search(query, limit=limit)
         for match in matches:
             if self.normalize_brand(match.get("brand_name")) == query_key:
                 return match
+
+        # Do not fall through to a fuzzy result. If the upstream registry misses
+        # a known exact brand, use only a vetted identity record.
+        known = KNOWN_BRANDS.get(query_key)
+        if known:
+            return dict(known)
         return None
 
     async def same_composition_brands(
@@ -57,12 +78,7 @@ class IndiaDrugRegistry:
         exclude_brand: str | None = None,
         limit: int = 20,
     ) -> list[str]:
-        """Return only registry brands with the same normalized composition.
-
-        This is an identification list. It is intentionally not a therapeutic
-        substitution engine. Exact composition text is required so products
-        with a different salt, such as Zerodol Spas, are excluded.
-        """
+        """Return only registry brands with the same normalized composition."""
         if not generic_name:
             return []
         matches = await self.search(generic_name, limit=limit)
