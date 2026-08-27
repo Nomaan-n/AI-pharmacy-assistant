@@ -6,6 +6,8 @@ class Settings(BaseSettings):
     app_version: str = "2.2.0"
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-20b"
+    google_api_key: str | None = None
+    google_cse_id: str | None = None
     daily_med_base_url: str = "https://dailymed.nlm.nih.gov/dailymed/services/v2"
     india_drug_db_url: str = "https://drugdb.in"
     request_timeout_seconds: float = 8.0
