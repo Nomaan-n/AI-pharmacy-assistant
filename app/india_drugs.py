@@ -12,6 +12,8 @@ from .config import get_settings
 logger = logging.getLogger(__name__)
 
 KNOWN_BRANDS: dict[str, dict[str, str]] = {
+    "pantosecdsr": {"brand_name": "Pantosec DSR", "generic_name": "Pantoprazole 40 mg + Domperidone 30 mg", "manufacturer": "Cipla Ltd", "strength": "40 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.apollopharmacy.in/medicine/pantosec-dsr-capsule", "source_title": "Apollo Pharmacy - New Pantosec DSR Capsule", "source_type": "Indian product reference", "use_summary": "Pantosec DSR contains pantoprazole and domperidone and is prescribed for acid reflux and related gastrointestinal symptoms."},
+    "pantociddsr": {"brand_name": "Pantocid DSR", "generic_name": "Pantoprazole 40 mg + Domperidone 30 mg", "manufacturer": "Sun Pharmaceutical Industries Ltd", "strength": "40 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://sunpharma.com/india-products/", "source_title": "Sun Pharma India Products - Pantocid DSR", "source_type": "Manufacturer product reference", "use_summary": "Pantocid DSR contains pantoprazole and domperidone and is used for acid-related gastrointestinal conditions."},
     "zerodolsp": {"brand_name": "Zerodol-SP", "generic_name": "Aceclofenac 100 mg + Paracetamol 325 mg + Serratiopeptidase 15 mg", "manufacturer": "Ipca Laboratories Ltd", "strength": "100 mg + 325 mg + 15 mg", "form": "oral tablet", "source_url": "https://ipca.com/wp-content/pdf/revised-pricelist-of-all-domestic-formulations-applicable-22-09-2025.pdf", "source_title": "IPCA domestic formulations list", "source_type": "Manufacturer product reference", "use_summary": "Zerodol-SP is a pain-relief combination used for short-term relief of pain and inflammation."},
     "zerodolspas": {"brand_name": "Zerodol-Spas", "generic_name": "Drotaverine + Aceclofenac", "manufacturer": "Ipca Laboratories Ltd", "strength": "100 mg + 80 mg", "form": "oral tablet", "source_url": "https://www.ipca.com/pharmaceutical-formulations-manufacturers-india/?id=pr_95", "source_title": "IPCA pharmaceutical formulations", "source_type": "Manufacturer product reference", "use_summary": "Zerodol-Spas is a combination used for relief of pain associated with muscle or abdominal spasms."},
     "suhagra": {"brand_name": "Suhagra", "generic_name": "Sildenafil", "manufacturer": "Cipla Ltd", "strength": "Multiple strengths; strength not specified in query", "form": "oral tablet", "source_url": "https://www.apollopharmacy.in/medicine/suhagra-50mg-tablet", "source_title": "Apollo Pharmacy - Suhagra-50 Tablet", "source_type": "Indian product reference", "use_summary": "Suhagra contains sildenafil and is primarily used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation."},
@@ -22,6 +24,8 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
 }
 
 BRAND_ALIASES: dict[str, str] = {
+    "newpantosecdsr": "pantosecdsr", "pantosecdsr30": "pantosecdsr", "pantosecdsr3040": "pantosecdsr", "pantosecdsr3040mg": "pantosecdsr", "pantosecds": "pantosecdsr",
+    "pantociddsr": "pantociddsr", "pantociddsr3040": "pantociddsr", "pantociddsr3040mg": "pantociddsr", "pantociddsr30": "pantociddsr",
     "zerodolsp10032515": "zerodolsp", "zerodolsp10032515mg": "zerodolsp",
     "zerodolspas": "zerodolspas", "zerodolspas10080": "zerodolspas", "zerodolspas10080mg": "zerodolspas",
     "suhagra50mg": "suhagra50", "suhagra50mgtablet": "suhagra50", "suhagra100mg": "suhagra100", "suhagra100mgtablet": "suhagra100",
