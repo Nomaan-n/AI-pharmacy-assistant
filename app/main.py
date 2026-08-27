@@ -13,7 +13,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="A safety-aware medication information assistant grounded in drug labels, Indian drug identification data, and Google Agent Search over configured medical websites.",
+    description="A safety-aware medication information assistant grounded in drug labels, Indian drug identification data, and free public drug identity services.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -33,7 +33,7 @@ async def home():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": settings.app_version, "llm_configured": bool(settings.groq_api_key), "india_registry": True, "google_agent_search": bool(settings.google_api_key and settings.google_search_project_id and settings.google_search_engine_id)}
+    return {"status": "ok", "version": settings.app_version, "llm_configured": bool(settings.groq_api_key), "india_registry": True, "google_agent_search": False, "public_drug_discovery": True}
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -49,8 +49,6 @@ async def chat(request: ChatRequest):
         exclude_brand=str(original_brand) if original_brand else None,
     )
 
-    # Only show purchase links when the product identity is known. Never turn
-    # an unresolved user query into generic shopping links.
     medication["india_alternatives"] = india_alternatives
     medication["purchase_links"] = (
         IndiaDrugRegistry.purchase_links(str(original_brand)) if original_brand else []
