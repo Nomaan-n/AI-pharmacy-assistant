@@ -3,10 +3,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     app_name: str = "AI Pharmacy Assistant"
-    app_version: str = "2.4.0"
+    app_version: str = "3.0.0"
     groq_api_key: str | None = None
     groq_model: str = "openai/gpt-oss-20b"
     daily_med_base_url: str = "https://dailymed.nlm.nih.gov/dailymed/services/v2"
+    openfda_base_url: str = "https://api.fda.gov/drug/label.json"
     india_drug_db_url: str = "https://drugdb.in"
     rxnorm_base_url: str = "https://rxnav.nlm.nih.gov/REST"
     pubchem_base_url: str = "https://pubchem.ncbi.nlm.nih.gov/rest/pug"

@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import re
+from urllib.parse import quote_plus
 import httpx
 from .config import get_settings
 from .india_drugs import IndiaDrugRegistry
@@ -12,66 +13,53 @@ class GroundingResult:
     sources: list[dict]
     grounded: bool
 
-
 class PublicDrugDiscovery:
-    """Free public drug-identity discovery using NIH RxNorm and PubChem.
-
-    This is deliberately an identity resolver, not a source of invented clinical
-    advice. Clinical claims still need a drug label such as DailyMed/openFDA.
-    """
+    """Free, public drug-information discovery using NLM, PubChem and FDA services."""
     def __init__(self, settings) -> None:
         self.settings = settings
 
-    async def resolve(self, query: str) -> tuple[dict | None, list[dict]]:
-        result = await self._rxnorm(query)
-        if result:
-            return result
-        return await self._pubchem(query)
-
-    async def _rxnorm(self, query: str) -> tuple[dict, list[dict]] | None:
+    async def pubchem(self, query: str) -> dict | None:
+        base = self.settings.pubchem_base_url
         try:
             async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
-                r = await client.get(f"{self.settings.rxnorm_base_url}/approximateTerm.json", params={"term": query, "maxEntries": 5})
-                r.raise_for_status()
-                candidates = (r.json().get("approximateGroup", {}) or {}).get("candidate", []) or []
-                if isinstance(candidates, dict): candidates = [candidates]
-                if not candidates: return None
-                candidate = sorted(candidates, key=lambda x: float(x.get("score", 0) or 0), reverse=True)[0]
-                rxcui = str(candidate.get("rxcui") or "")
-                if not rxcui: return None
-                p = await client.get(f"{self.settings.rxnorm_base_url}/rxcui/{rxcui}/properties.json")
-                p.raise_for_status()
-                props = (p.json().get("properties") or {})
-                name = props.get("name") or candidate.get("name") or query
-                tty = props.get("tty")
-                source = {"title": f"NIH RxNorm: {name}", "url": f"https://rxnav.nlm.nih.gov/REST/rxcui/{rxcui}/properties.json", "source_type": "NIH RxNorm", "published_or_updated": None}
-                return {"name": query, "generic_name": name, "rxnorm_rxcui": rxcui, "rxnorm_tty": tty, "identity_source": "NIH RxNorm"}, [source]
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            return None
-
-    async def _pubchem(self, query: str) -> tuple[dict, list[dict]] | None:
-        try:
-            async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
-                url = f"{self.settings.pubchem_base_url}/compound/name/{httpx.URL(query).raw_path.decode('utf-8')}/property/Title,IUPACName,MolecularFormula,CanonicalSMILES/JSON"
-                r = await client.get(url)
-                if r.status_code != 200: return None
-                props = (r.json().get("PropertyTable", {}).get("Properties") or [])
-                if not props: return None
+                encoded = quote_plus(query)
+                response = await client.get(f"{base}/compound/name/{encoded}/property/Title,MolecularFormula,IUPACName/JSON")
+                if response.status_code == 404:
+                    return None
+                response.raise_for_status()
+                props = response.json().get("PropertyTable", {}).get("Properties") or []
+                if not props:
+                    return None
                 row = props[0]
-                title = row.get("Title") or query
-                source = {"title": f"PubChem: {title}", "url": f"https://pubchem.ncbi.nlm.nih.gov/#query={query}", "source_type": "NIH PubChem", "published_or_updated": None}
-                return {"name": query, "generic_name": title, "pubchem_cid": row.get("CID"), "identity_source": "NIH PubChem"}, [source]
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+                synonyms = []
+                if row.get("CID"):
+                    syn = await client.get(f"{base}/compound/cid/{row['CID']}/synonyms/JSON")
+                    if syn.status_code == 200:
+                        info = syn.json().get("InformationList", {}).get("Information", [])
+                        if info:
+                            synonyms = info[0].get("Synonym", [])[:20]
+                return {
+                    "brand_name": query, "generic_name": row.get("Title"), "strength": None, "form": None,
+                    "pubchem_cid": row.get("CID"), "molecular_formula": row.get("MolecularFormula"),
+                    "iupac_name": row.get("IUPACName"), "synonyms": synonyms,
+                    "source_title": f"PubChem: {row.get('Title') or query}",
+                    "source_url": f"https://pubchem.ncbi.nlm.nih.gov/compound/{row.get('CID')}",
+                    "source_type": "PubChem/NLM",
+                }
+        except (httpx.HTTPError, ValueError, TypeError, KeyError):
             return None
 
+    async def resolve(self, query: str) -> dict | None:
+        return await self.pubchem(query)
 
 class DailyMedRetriever:
+    """Resolve a medicine, then ground clinical facts in public authoritative labels."""
     VERIFIED_BRANDS = {
-        "suhagra": {"brand_name": "Suhagra", "generic_name": "Sildenafil", "manufacturer": "Cipla Ltd", "strength": "Multiple strengths; strength not specified in query", "form": "oral tablet", "source_url": "https://www.cipla.com/", "source_title": "Cipla - Suhagra product family", "source_type": "Indian manufacturer reference", "use_summary": "Suhagra contains sildenafil and is primarily used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation."},
-        "suhagra50": {"brand_name": "Suhagra 50", "generic_name": "Sildenafil 50 mg", "manufacturer": "Cipla Ltd", "strength": "50 mg", "form": "oral tablet", "source_url": "https://www.apollopharmacy.in/medicine/suhagra-50mg-tablet", "source_title": "Suhagra-50 Tablet - Apollo Pharmacy", "source_type": "Indian product reference", "use_summary": "Suhagra 50 contains sildenafil and is used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation."},
-        "suhagra100": {"brand_name": "Suhagra 100", "generic_name": "Sildenafil 100 mg", "manufacturer": "Cipla Ltd", "strength": "100 mg", "form": "oral tablet", "source_url": "https://www.cipla.com/", "source_title": "Cipla - Suhagra product family", "source_type": "Indian manufacturer reference", "use_summary": "Suhagra 100 contains sildenafil and is used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation."},
-        "zerodolsp": {"brand_name": "Zerodol-SP", "generic_name": "Aceclofenac 100 mg + Paracetamol 325 mg + Serratiopeptidase 15 mg", "manufacturer": "Ipca Laboratories Ltd", "strength": "100 mg + 325 mg + 15 mg", "form": "oral tablet", "source_url": "https://www.ipca.com/", "source_title": "IPCA - Zerodol product family", "source_type": "Indian manufacturer reference", "use_summary": "Zerodol-SP is a pain-relief combination used for short-term relief of pain and inflammation."},
-        "zerodolspas": {"brand_name": "Zerodol-Spas", "generic_name": "Aceclofenac 100 mg + Drotaverine Hydrochloride 80 mg", "manufacturer": "Ipca Laboratories Ltd", "strength": "100 mg + 80 mg", "form": "oral tablet", "source_url": "https://www.ipca.com/", "source_title": "IPCA - Zerodol product family", "source_type": "Indian manufacturer reference", "use_summary": "Zerodol-Spas is a combination used for relief of pain associated with muscle or abdominal spasms."},
+        "suhagra": {"brand_name": "Suhagra", "generic_name": "Sildenafil", "manufacturer": "Cipla Ltd", "strength": "Multiple strengths; strength not specified in query", "form": "oral tablet", "source_url": "https://www.cipla.com/", "source_title": "Cipla - Suhagra product family", "source_type": "Indian manufacturer reference", "use_summary": "Suhagra contains sildenafil and is primarily used to treat erectile dysfunction."},
+        "suhagra50": {"brand_name": "Suhagra 50", "generic_name": "Sildenafil 50 mg", "manufacturer": "Cipla Ltd", "strength": "50 mg", "form": "oral tablet", "source_url": "https://www.cipla.com/", "source_title": "Cipla - Suhagra product family", "source_type": "Indian manufacturer reference", "use_summary": "Suhagra 50 contains sildenafil and is used to treat erectile dysfunction."},
+        "suhagra100": {"brand_name": "Suhagra 100", "generic_name": "Sildenafil 100 mg", "manufacturer": "Cipla Ltd", "strength": "100 mg", "form": "oral tablet", "source_url": "https://www.cipla.com/", "source_title": "Cipla - Suhagra product family", "source_type": "Indian manufacturer reference", "use_summary": "Suhagra 100 contains sildenafil and is used to treat erectile dysfunction."},
+        "zerodolsp": {"brand_name": "Zerodol-SP", "generic_name": "Aceclofenac 100 mg + Paracetamol 325 mg + Serratiopeptidase 15 mg", "manufacturer": "Ipca Laboratories Ltd", "strength": "100 mg + 325 mg + 15 mg", "form": "oral tablet", "source_url": "https://www.ipca.com/", "source_title": "Ipca Laboratories - Zerodol product family", "source_type": "Indian manufacturer reference", "use_summary": "Zerodol-SP is a pain-relief combination used for short-term relief of pain and inflammation."},
+        "zerodolspas": {"brand_name": "Zerodol-Spas", "generic_name": "Aceclofenac 100 mg + Drotaverine Hydrochloride 80 mg", "manufacturer": "Ipca Laboratories Ltd", "strength": "100 mg + 80 mg", "form": "oral tablet", "source_url": "https://www.ipca.com/", "source_title": "Ipca Laboratories - Zerodol product family", "source_type": "Indian manufacturer reference", "use_summary": "Zerodol-Spas is a combination used for relief of pain associated with muscle or abdominal spasms."},
     }
     KNOWN = {"acetaminophen", "paracetamol", "ibuprofen", "amoxicillin", "metformin", "amlodipine", "losartan", "atorvastatin", "omeprazole", "cetirizine", "azithromycin", "diclofenac", "pantoprazole", "levothyroxine", "aspirin", "warfarin", "insulin", "prednisone", "salbutamol", "albuterol"}
     STOPWORDS = {"my", "the", "a", "an", "this", "that", "medicine", "medication", "drug", "tablet", "capsule", "prescribed", "dose", "dosage", "pill", "blood", "thinner", "pain", "question"}
@@ -80,45 +68,36 @@ class DailyMedRetriever:
         self.settings = get_settings()
         self.india = IndiaDrugRegistry()
         self.universal = UniversalDrugResolver()
-        self.discovery = PublicDrugDiscovery(self.settings)
+        self.public = PublicDrugDiscovery(self.settings)
 
     async def retrieve(self, question: str) -> GroundingResult:
         query = self._extract_medication_candidate(question)
         if not query:
             return GroundingResult({}, "No specific medication was identified. Do not infer a drug from a medication category or symptom.", [], False)
-        verified = self.VERIFIED_BRANDS.get(self._brand_key(query))
-        product = dict(verified) if verified else None
-        sources = []
-        if not product: product = await self.india.exact_brand(query)
+        product = self.VERIFIED_BRANDS.get(self._brand_key(query))
         if product:
-            product_source = self._product_source(product)
-            if product_source: sources.append(product_source)
-        if not product: product = await self.universal.resolve(query)
-        india_context = self._india_context(product) if product else {}
+            product = dict(product)
+        if not product:
+            product = await self.india.exact_brand(query)
+        if not product:
+            product = await self.universal.resolve(query)
+        if not product:
+            product = await self.public.resolve(query)
+        india_context = self._india_context(product) if product and "Indian" in str(product.get("source_type", "")) else {}
         medication_name = (product.get("generic_name") if product else None) or query
+        product_source = self._product_source(product)
+
         label_result = await self._dailymed(medication_name, question)
         if label_result:
             medication, context, source = label_result
-            return GroundingResult({"name": query, **india_context, **medication}, context, sources + [source], True)
+            return GroundingResult({"name": query, **india_context, **medication}, context, ([product_source] if product_source else []) + [source], True)
         fda_result = await self._openfda(medication_name, question)
         if fda_result:
             medication, context, source = fda_result
-            return GroundingResult({"name": query, **india_context, **medication}, context, sources + [source], True)
+            return GroundingResult({"name": query, **india_context, **medication}, context, ([product_source] if product_source else []) + [source], True)
         if product:
             context = self._product_context(product)
-            return GroundingResult({"name": query, **india_context}, context, sources, bool(context))
-        discovered, discovery_sources = await self.discovery.resolve(query)
-        if discovered:
-            generic = discovered.get("generic_name") or query
-            label_result = await self._dailymed(generic, question)
-            if label_result:
-                medication, context, label_source = label_result
-                return GroundingResult({"name": query, **discovered, **medication}, context, discovery_sources + [label_source], True)
-            fda_result = await self._openfda(generic, question)
-            if fda_result:
-                medication, context, label_source = fda_result
-                return GroundingResult({"name": query, **discovered, **medication}, context, discovery_sources + [label_source], True)
-            return GroundingResult({"name": query, **discovered}, f"The medicine identity was resolved through {discovered.get('identity_source')}, but no trusted clinical label was found. Do not invent uses, dosage, interactions, or safety information.", discovery_sources, True)
+            return GroundingResult({"name": query, **india_context}, context, [product_source] if product_source else [], bool(context))
         return GroundingResult({"name": query}, f"No verified medication product or label was found for '{query}'. Do not guess its composition or use.", [], False)
 
     async def _dailymed(self, medication: str, question: str) -> tuple[dict, str, dict] | None:
@@ -127,20 +106,18 @@ class DailyMedRetriever:
                 response = await client.get(f"{self.settings.daily_med_base_url}/spls.json", params={"drug_name": medication, "name_type": "both", "pagesize": 3, "page": 1})
                 response.raise_for_status()
                 rows = response.json().get("data", [])
-                if not rows: return None
                 for row in rows:
                     set_id = row.get("setid") or row.get("setId")
                     if not set_id: continue
                     detail = await client.get(f"{self.settings.daily_med_base_url}/spls/{set_id}.json")
                     detail.raise_for_status()
                     payload = detail.json()
-                    xml = payload.get("xml", "") or payload.get("data", "") or ""
-                    text = self._label_text(xml)
-                    if not text: continue
+                    text = self._label_text(payload.get("xml", "") or payload.get("data", "") or "")
                     context = self._select_relevant_context(text, question)
                     if context:
                         return {"name": medication, "label_source": "DailyMed", "set_id": str(set_id)}, context, {"title": f"DailyMed label: {medication}", "url": f"{self.settings.daily_med_base_url}/spls/{set_id}.json", "source_type": "DailyMed", "published_or_updated": None}
-        except (httpx.HTTPError, ValueError, KeyError, TypeError): return None
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return None
         return None
 
     async def _openfda(self, medication: str, question: str) -> tuple[dict, str, dict] | None:
@@ -149,48 +126,37 @@ class DailyMedRetriever:
         try:
             async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
                 for field, search in searches:
-                    response = await client.get("https://api.fda.gov/drug/label.json", params={"search": search, "limit": 5})
+                    response = await client.get(self.settings.openfda_base_url, params={"search": search, "limit": 5})
                     if response.status_code == 404: continue
                     response.raise_for_status()
-                    results = response.json().get("results", []) or []
-                    for row in results:
-                        openfda = row.get("openfda", {}) or {}
-                        brand = (openfda.get("brand_name") or [None])[0]
-                        generic = (openfda.get("generic_name") or openfda.get("substance_name") or [None])[0]
-                        forms = openfda.get("dosage_form") or []
-                        manufacturers = openfda.get("manufacturer_name") or []
-                        values = openfda.get("brand_name") or [] if field == "brand_name" else openfda.get("generic_name") or openfda.get("substance_name") or []
+                    for row in response.json().get("results", []) or []:
+                        fda = row.get("openfda", {}) or {}
+                        values = fda.get("brand_name") or [] if field == "brand_name" else fda.get("generic_name") or fda.get("substance_name") or []
                         if self._normalize(medication) not in {self._normalize(v) for v in values}: continue
-                        indication = row.get("indications_and_usage") or []
-                        warnings = row.get("warnings") or []
-                        precautions = row.get("precautions") or []
-                        interactions = row.get("drug_interactions") or []
-                        adverse = row.get("adverse_reactions") or []
+                        brand = (fda.get("brand_name") or [None])[0]
+                        generic = (fda.get("generic_name") or fda.get("substance_name") or [None])[0]
                         q = question.lower()
-                        chunks = interactions + warnings + precautions if "interaction" in q else adverse + warnings + precautions if "side effect" in q or "adverse" in q else indication + warnings + precautions
+                        chunks = (row.get("drug_interactions") or []) + (row.get("warnings") or []) + (row.get("precautions") or []) if "interaction" in q else (row.get("adverse_reactions") or []) + (row.get("warnings") or []) + (row.get("precautions") or []) if "side effect" in q or "adverse" in q else (row.get("indications_and_usage") or []) + (row.get("warnings") or []) + (row.get("precautions") or [])
                         context = " ".join(str(x) for x in chunks if x)[:6000]
                         if context:
-                            return {"name": medication, "brand_name": brand, "generic_name": generic, "form": forms[0] if forms else None, "manufacturer": manufacturers[0] if manufacturers else None, "label_source": "openFDA"}, context, {"title": f"openFDA drug label: {brand or generic or medication}", "url": "https://open.fda.gov/apis/drug/label/", "source_type": "openFDA", "published_or_updated": None}
-        except (httpx.HTTPError, ValueError, KeyError, TypeError): return None
+                            return {"name": medication, "brand_name": brand, "generic_name": generic, "form": (fda.get("dosage_form") or [None])[0], "manufacturer": (fda.get("manufacturer_name") or [None])[0], "label_source": "openFDA"}, context, {"title": f"openFDA drug label: {brand or generic or medication}", "url": "https://open.fda.gov/apis/drug/label/", "source_type": "openFDA", "published_or_updated": None}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return None
         return None
 
     @staticmethod
     def _product_source(row: dict | None) -> dict | None:
-        if not row: return None
-        url = row.get("source_url")
-        if not url: return None
-        return {"title": str(row.get("source_title") or row.get("brand_name") or "Medicine product reference"), "url": str(url), "source_type": str(row.get("source_type") or "Medicine product reference"), "published_or_updated": None}
+        if not row or not row.get("source_url"): return None
+        return {"title": str(row.get("source_title") or row.get("brand_name") or "Medicine reference"), "url": str(row["source_url"]), "source_type": str(row.get("source_type") or "Medicine reference"), "published_or_updated": None}
 
     @staticmethod
     def _product_context(row: dict) -> str:
-        brand, generic, manufacturer = row.get("brand_name"), row.get("generic_name"), row.get("manufacturer")
-        strength, form, use_summary = row.get("strength"), row.get("form"), row.get("use_summary")
         parts = []
-        if brand: parts.append(f"Product: {brand}.")
-        if generic: parts.append(f"Active ingredient/composition: {generic}.")
-        if manufacturer: parts.append(f"Manufacturer: {manufacturer}.")
-        if strength or form: parts.append(f"Strength/form: {(strength or '').strip()} {(form or '').strip()}.".strip())
-        if use_summary: parts.append(f"Verified product information: {use_summary}")
+        for label, key in (("Product", "brand_name"), ("Active ingredient/composition", "generic_name"), ("Manufacturer", "manufacturer"), ("Strength/form", "strength")):
+            if row.get(key): parts.append(f"{label}: {row[key]}.")
+        if row.get("form") and not row.get("strength"): parts.append(f"Dosage form: {row['form']}.")
+        if row.get("use_summary"): parts.append(f"Verified use summary: {row['use_summary']}")
+        if row.get("molecular_formula"): parts.append(f"Molecular formula: {row['molecular_formula']}.")
         return " ".join(parts)
 
     @classmethod
@@ -199,25 +165,23 @@ class DailyMedRetriever:
         return {"india_brand_name": row.get("brand_name"), "india_generic_name": row.get("generic_name"), "india_manufacturer": row.get("manufacturer"), "india_strength": row.get("strength"), "india_form": row.get("form")}
 
     @classmethod
-    def _brand_key(cls, value: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", value.lower())
+    def _brand_key(cls, value: str) -> str: return re.sub(r"[^a-z0-9]+", "", value.lower())
 
     @classmethod
     def _extract_medication_candidate(cls, question: str) -> str | None:
         q = question.lower().strip()
-        generic_patterns = [r"^what\s+is\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80}?)(?:\s+used\s+for)?[?!.]*$", r"^what\s+are\s+the\s+uses\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^tell\s+me\s+about\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^information\s+(?:on|about)\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^uses?\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$"]
-        for pattern in generic_patterns:
+        patterns = [r"^what\s+is\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80}?)(?:\s+used\s+for)?[?!.]*$", r"^what\s+are\s+the\s+uses\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^tell\s+me\s+about\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^information\s+(?:on|about)\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^uses?\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$"]
+        for pattern in patterns:
             match = re.match(pattern, q, re.I)
             if match:
                 candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
                 if candidate and candidate not in cls.STOPWORDS: return candidate
         if len(q) <= 80 and not re.search(r"[?]", q):
             plain = re.sub(r"^(?:medicine|medication|drug)\s*[:=-]\s*", "", q).strip()
-            if plain and len(plain.split()) <= 5 and plain not in cls.STOPWORDS and not any(token in plain.split() for token in {"why", "when", "where", "should", "can", "could"}): return plain
+            if plain and len(plain.split()) <= 5 and plain not in cls.STOPWORDS and not any(t in plain.split() for t in {"why", "when", "where", "should", "can", "could"}): return plain
         for name in cls.KNOWN:
             if re.search(rf"\b{re.escape(name)}\b", q): return name
-        brand_patterns = [r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b", r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b", r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b"]
-        for pattern in brand_patterns:
+        for pattern in [r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b", r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b", r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b"]:
             match = re.search(pattern, question, re.I)
             if match:
                 candidate = re.sub(r"\s+", " ", match.group(1)).strip(" .,-")
@@ -232,12 +196,11 @@ class DailyMedRetriever:
 
     @staticmethod
     def _select_relevant_context(text: str, question: str) -> str:
-        keywords = ["boxed warning", "warnings", "precautions", "contraindications", "adverse reactions", "drug interactions", "indications and usage"]
         q = question.lower()
         if "interaction" in q: preferred = ["drug interactions", "warnings", "precautions", "contraindications"]
         elif "side effect" in q or "adverse" in q: preferred = ["adverse reactions", "warnings", "precautions"]
         elif "use" in q or "used" in q or "treat" in q or "what does" in q: preferred = ["indications and usage", "warnings", "precautions"]
-        else: preferred = keywords
+        else: preferred = ["boxed warning", "warnings", "precautions", "contraindications", "adverse reactions", "drug interactions", "indications and usage"]
         chunks, lower = [], text.lower()
         for keyword in preferred:
             idx = lower.find(keyword)
@@ -246,5 +209,4 @@ class DailyMedRetriever:
         return " ".join(chunks)[:6000]
 
     @staticmethod
-    def _normalize(value: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", value.lower())
+    def _normalize(value: str) -> str: return re.sub(r"[^a-z0-9]+", "", value.lower())
