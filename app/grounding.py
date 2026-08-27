@@ -14,7 +14,11 @@ class GroundingResult:
 
 
 class DailyMedRetriever:
-    """Resolve medicines dynamically, then ground clinical facts in trusted labels."""
+    """Resolve medicines dynamically, then ground clinical facts in trusted labels.
+
+    Google Programmable Search is a discovery fallback for unfamiliar medicine
+    names. Search snippets are not treated as authoritative clinical guidance.
+    """
 
     VERIFIED_BRANDS = {
         "suhagra": {"brand_name": "Suhagra", "generic_name": "Sildenafil", "manufacturer": "Cipla Ltd", "strength": "Multiple strengths; strength not specified in query", "form": "oral tablet", "source_url": "https://www.cipla.com/", "source_title": "Cipla - Suhagra product family", "source_type": "Indian manufacturer reference", "use_summary": "Suhagra contains sildenafil and is primarily used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation."},
@@ -39,6 +43,20 @@ class DailyMedRetriever:
         product = dict(verified) if verified else None
         if not product: product = await self.india.exact_brand(query)
         if not product: product = await self.universal.resolve(query)
+
+        # Last-resort web discovery for unfamiliar brand/generic names. This
+        # does not answer clinical questions directly. It supplies discovery
+        # evidence only; clinical facts still require trusted sources.
+        web_discovery = await self._google_discovery(query)
+        if not product and web_discovery:
+            context, source = web_discovery
+            return GroundingResult(
+                {"name": query},
+                "Web discovery results for medicine identification only. Do not treat these snippets as authoritative clinical facts. " + context,
+                [source],
+                False,
+            )
+
         india_context = self._india_context(product) if product else {}
         medication_name = (product.get("generic_name") if product else None) or query
         product_source = self._product_source(product)
@@ -56,6 +74,31 @@ class DailyMedRetriever:
             context = self._product_context(product)
             return GroundingResult({"name": query, **india_context}, context, [product_source] if product_source else [], bool(context))
         return GroundingResult({"name": query}, f"No verified medication product or label was found for '{query}'. Do not guess its composition or use.", [], False)
+
+    async def _google_discovery(self, query: str) -> tuple[str, dict] | None:
+        """Search Google for unfamiliar medicine names without using it as a clinical source."""
+        if not self.settings.google_api_key or not self.settings.google_cse_id:
+            return None
+        search_query = f'"{query}" medicine tablet composition generic'
+        params = {"key": self.settings.google_api_key, "cx": self.settings.google_cse_id, "q": search_query, "num": 5, "safe": "active"}
+        try:
+            async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
+                response = await client.get("https://www.googleapis.com/customsearch/v1", params=params)
+                response.raise_for_status()
+                items = response.json().get("items", []) or []
+            snippets = []
+            for item in items:
+                title = str(item.get("title") or "").strip()
+                snippet = str(item.get("snippet") or "").strip()
+                if title and snippet:
+                    snippets.append(f"{title}: {snippet}")
+                if len(snippets) >= 5:
+                    break
+            if not snippets:
+                return None
+            return " ".join(snippets)[:5000], {"title": f"Google medicine discovery: {query}", "url": "https://www.google.com/", "source_type": "Web discovery (not clinical authority)", "published_or_updated": None}
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return None
 
     async def _dailymed(self, medication: str, question: str) -> tuple[dict, str, dict] | None:
         try:
@@ -141,13 +184,7 @@ class DailyMedRetriever:
     @classmethod
     def _extract_medication_candidate(cls, question: str) -> str | None:
         q = question.lower().strip()
-        generic_patterns = [
-            r"^what\s+is\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80}?)(?:\s+used\s+for)?[?!.]*$",
-            r"^what\s+are\s+the\s+uses\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
-            r"^tell\s+me\s+about\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
-            r"^information\s+(?:on|about)\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
-            r"^uses?\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
-        ]
+        generic_patterns = [r"^what\s+is\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80}?)(?:\s+used\s+for)?[?!.]*$", r"^what\s+are\s+the\s+uses\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^tell\s+me\s+about\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^information\s+(?:on|about)\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^uses?\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$"]
         for pattern in generic_patterns:
             match = re.match(pattern, q, re.I)
             if match:
@@ -158,11 +195,7 @@ class DailyMedRetriever:
             if plain and len(plain.split()) <= 5 and plain not in cls.STOPWORDS and not any(token in plain.split() for token in {"why", "when", "where", "should", "can", "could"}): return plain
         for name in cls.KNOWN:
             if re.search(rf"\b{re.escape(name)}\b", q): return name
-        brand_patterns = [
-            r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b",
-            r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b",
-            r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b",
-        ]
+        brand_patterns = [r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b", r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b", r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b"]
         for pattern in brand_patterns:
             match = re.search(pattern, question, re.I)
             if match:
