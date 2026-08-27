@@ -1,42 +1,66 @@
 # AI Pharmacy Assistant
 
-A safety-aware AI medication information assistant built with FastAPI, an LLM layer, and live grounding against DailyMed labeling from the U.S. National Library of Medicine.
+A safety-aware medication intelligence web application that resolves medicine identities across Indian brand names and generic names, retrieves evidence from public drug-information services, and produces concise grounded explanations.
 
-## Why this project exists
+## Portfolio summary
 
-Medication questions are a poor fit for an ungrounded chatbot. This project demonstrates a safer architecture: identify a medication, retrieve authoritative label context, apply deterministic safety rules, then optionally ask an LLM to explain only the supplied evidence.
+**AI Pharmacy Assistant** demonstrates healthcare-domain software engineering across medication entity resolution, retrieval-grounded LLMs, public API integration, deterministic safety guardrails, typed APIs, automated testing, responsive frontend design, and deployment packaging.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  U[User] --> API[FastAPI /api/chat]
-  API --> S[Safety classifier]
-  API --> R[DailyMed retriever]
-  R --> D[DailyMed/NLM labels]
-  S --> L[LLM guardrail prompt]
+  U[User] --> UI[Responsive Web UI]
+  UI --> API[FastAPI /api/chat]
+  API --> S[Deterministic Safety Layer]
+  API --> R[Medication Resolver]
+  R --> I[Indian Medicine Registry]
+  R --> X[RxNorm / NLM]
+  R --> P[PubChem / NLM]
+  R --> F[openFDA]
+  R --> D[DailyMed / NLM]
+  S --> L[Constrained LLM Explanation]
   R --> L
-  L --> O[Structured response]
-  O --> UI[Web frontend]
+  L --> O[Typed Response + Evidence]
+  O --> UI
 ```
 
-## Features
+## Core capabilities
 
-- `POST /api/chat` structured chat endpoint
-- Deterministic safety classification for urgent and higher-risk queries
-- Live DailyMed label retrieval when a medication can be identified
-- Source URLs returned with responses
-- Optional OpenAI Responses API integration
-- Safe deterministic fallback when an LLM key is absent or the model fails
-- Pydantic validation and typed API schemas
-- Automated API tests
-- Minimal browser frontend
-- Docker and Render configuration
-- Interactive OpenAPI documentation at `/docs`
+- Search by **Indian brand name**, generic name, strength, or common typing variants.
+- Conservative exact-match handling to avoid silently substituting similar products.
+- Dynamic medication identity resolution through the Indian medicine registry, RxNorm/NLM, openFDA, and PubChem/NLM.
+- Clinical grounding through DailyMed and openFDA drug-label information.
+- Public-source fallback discovery without requiring Google Cloud billing.
+- Source URLs returned with results so users can inspect the evidence.
+- Deterministic safety handling for urgent or treatment-change requests before an LLM is used.
+- LLM explanations constrained to retrieved evidence, with deterministic fallback when the model is unavailable.
+- Typed FastAPI request/response schemas with Pydantic validation.
+- Responsive, mobile-first frontend with medication identity cards, evidence panels, source badges, loading states, and safety notices.
+- Docker and Render deployment configuration.
+- Interactive OpenAPI documentation at `/docs`.
 
-DailyMed provides current Structured Product Label information through a REST API. The FDA also identifies DailyMed as an official place to search drug labeling. See the project documentation links below.
+## Retrieval strategy
 
-## Run locally
+The application does not treat a generic web result as medical truth. It separates **identity resolution** from **clinical grounding**:
+
+1. Normalize the user's medication query.
+2. Check verified/local Indian product data.
+3. Resolve generic concepts through RxNorm/NLM.
+4. Use PubChem/NLM for additional compound identity discovery.
+5. Retrieve label evidence from DailyMed/openFDA.
+6. If evidence is insufficient, return an explicit uncertainty state rather than inventing a composition or indication.
+7. Pass only retrieved context to the explanation layer.
+
+This architecture is intentionally designed so that an obscure or newly encountered medicine does not require manually embedding every possible brand name in application code.
+
+## Safety design
+
+The application is informational and is not a diagnostic or prescribing system. It does not instruct users to start, stop, increase, or decrease prescription treatment. Urgent and treatment-change requests are handled deterministically before the LLM runs. Missing evidence is treated as missing evidence, not as permission to guess.
+
+A production clinical system would require substantially more validation, governance, monitoring, source coverage, privacy controls, clinical review, and regulatory assessment.
+
+## Local development
 
 ```bash
 python -m venv .venv
@@ -48,7 +72,7 @@ uvicorn app.main:app --reload
 
 Open `http://127.0.0.1:8000` for the web UI or `http://127.0.0.1:8000/docs` for Swagger UI.
 
-An OpenAI API key is optional. Without one, the application still demonstrates retrieval, safety classification, source grounding, and deterministic fallback behavior.
+The Groq API key is optional. Without it, deterministic retrieval and safety behavior still work.
 
 ## Example request
 
@@ -58,34 +82,28 @@ curl -X POST http://127.0.0.1:8000/api/chat \\
   -d '{"question":"What are common side effects of ibuprofen?"}'
 ```
 
-## Safety design
-
-The application does not diagnose conditions or provide individualized prescription instructions. It detects selected urgent and higher-risk contexts before the LLM runs. The LLM is explicitly instructed to avoid unsupported claims and to use only retrieved context.
-
-This is a portfolio project, not a medical device or clinically validated decision-support system.
-
 ## Testing
 
 ```bash
 pytest -q
 ```
 
-The tests cover validation, health checks, urgent-query handling, structured response shape, and grounding behavior using mocked retrieval.
-
-## Deployment
-
-A `render.yaml` and `Dockerfile` are included for deployment. The repository does not claim to be deployed until a live service is actually provisioned and tested.
+Tests cover API behavior, schema validation, safety rules, exact brand/composition normalization, RxNorm confidence rules, openFDA identity matching, and public-source discovery behavior.
 
 ## Data sources
 
-- DailyMed/NLM: https://dailymed.nlm.nih.gov/
-- FDA drug information: https://www.fda.gov/drugs/information-consumers-and-patients-drugs/find-information-about-drug
-- FDA drug safety: https://www.fda.gov/drugs/drug-safety-and-availability
+- DailyMed / National Library of Medicine: https://dailymed.nlm.nih.gov/
+- RxNorm / National Library of Medicine: https://rxnav.nlm.nih.gov/
+- PubChem / National Library of Medicine: https://pubchem.ncbi.nlm.nih.gov/
+- openFDA drug-label API: https://open.fda.gov/apis/drug/label/
+- Indian medicine registry integration: configured through `INDIA_DRUG_DB_URL`
 
-## Limitations
+## Deployment
 
-The medication identifier is intentionally conservative and the system depends on the availability of DailyMed labeling. A missing source is treated as missing evidence, not as permission for the model to guess. A production clinical system would require substantially more validation, governance, monitoring, source coverage, and regulatory review.
+The repository includes a Dockerfile and Render configuration. The application is designed to run without Google Cloud billing. The former Google Agent Search integration is intentionally not required.
 
-## Portfolio value
+## CV-ready description
 
-This project demonstrates practical skills across healthcare-domain reasoning, LLM integration, retrieval grounding, API design, safety guardrails, testing, documentation, and deployment packaging.
+**AI Pharmacy Assistant | Healthcare AI / Full-Stack Project**
+
+Built a safety-aware medication intelligence application using **FastAPI, Python, Pydantic, asynchronous HTTP retrieval, RxNorm/NLM, PubChem/NLM, DailyMed, openFDA, and an optional Groq-hosted LLM**. Implemented conservative brand/generic entity resolution, evidence-grounded generation, deterministic safety guardrails, typed APIs, automated tests, source attribution, Docker/Render deployment packaging, and a responsive mobile-first frontend. Designed the retrieval pipeline to handle unknown medicine queries without relying on a manually hard-coded finite brand catalog.
