@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 import re
 import httpx
+from google.api_core.client_options import ClientOptions
+from google.cloud import discoveryengine_v1 as discoveryengine
 from .config import get_settings
 from .india_drugs import IndiaDrugRegistry
 from .universal_drugs import UniversalDrugResolver
@@ -13,12 +15,82 @@ class GroundingResult:
     grounded: bool
 
 
-class DailyMedRetriever:
-    """Resolve medicines dynamically, then ground clinical facts in trusted labels.
+class VertexSearchRetriever:
+    """Search a Google Agent Search website app using the current Search Lite API.
 
-    Google Programmable Search is a discovery fallback for unfamiliar medicine
-    names. Search snippets are not treated as authoritative clinical guidance.
+    This replaces the retired Custom Search JSON API for new Google projects.
+    The Google app/data store must be configured with public medical websites.
     """
+
+    def __init__(self, settings) -> None:
+        self.settings = settings
+
+    @property
+    def configured(self) -> bool:
+        return bool(
+            self.settings.google_api_key
+            and self.settings.google_search_project_id
+            and self.settings.google_search_engine_id
+        )
+
+    async def search(self, query: str, question: str) -> tuple[str, list[dict]]:
+        if not self.configured:
+            return "", []
+        try:
+            options = ClientOptions(
+                api_key=self.settings.google_api_key,
+                api_endpoint=(
+                    f"{self.settings.google_search_location}-discoveryengine.googleapis.com"
+                    if self.settings.google_search_location != "global"
+                    else None
+                ),
+            )
+            client = discoveryengine.SearchServiceAsyncClient(client_options=options)
+            serving_config = (
+                f"projects/{self.settings.google_search_project_id}/locations/"
+                f"{self.settings.google_search_location}/collections/default_collection/"
+                f"engines/{self.settings.google_search_engine_id}/servingConfigs/default_search"
+            )
+            request = discoveryengine.SearchRequest(
+                serving_config=serving_config,
+                query=query,
+                page_size=5,
+            )
+            pager = await client.search_lite(request=request)
+            contexts = []
+            sources = []
+            async for result in pager:
+                document = result.document
+                derived = dict(document.derived_struct_data) if document.derived_struct_data else {}
+                link = str(derived.get("link") or "")
+                title = str(derived.get("title") or derived.get("htmlTitle") or "Medicine reference")
+                snippets = derived.get("snippets") or []
+                snippet_text = " ".join(
+                    str(item.get("snippet", "")) for item in snippets if isinstance(item, dict)
+                )
+                if not snippet_text:
+                    answers = derived.get("extractive_answers") or []
+                    snippet_text = " ".join(
+                        str(item.get("content", "")) for item in answers if isinstance(item, dict)
+                    )
+                if not snippet_text:
+                    continue
+                contexts.append(f"Source: {title}. URL: {link}. Extract: {snippet_text}")
+                if link:
+                    sources.append({
+                        "title": title,
+                        "url": link,
+                        "source_type": "Google Agent Search",
+                        "published_or_updated": None,
+                    })
+            await client.transport.close()
+            return "\n".join(contexts)[:10000], sources[:5]
+        except Exception:
+            return "", []
+
+
+class DailyMedRetriever:
+    """Resolve medicines dynamically, then ground clinical facts in trusted labels."""
 
     VERIFIED_BRANDS = {
         "suhagra": {"brand_name": "Suhagra", "generic_name": "Sildenafil", "manufacturer": "Cipla Ltd", "strength": "Multiple strengths; strength not specified in query", "form": "oral tablet", "source_url": "https://www.cipla.com/", "source_title": "Cipla - Suhagra product family", "source_type": "Indian manufacturer reference", "use_summary": "Suhagra contains sildenafil and is primarily used to treat erectile dysfunction by improving blood flow to the penis during sexual stimulation."},
@@ -34,6 +106,7 @@ class DailyMedRetriever:
         self.settings = get_settings()
         self.india = IndiaDrugRegistry()
         self.universal = UniversalDrugResolver()
+        self.google_search = VertexSearchRetriever(self.settings)
 
     async def retrieve(self, question: str) -> GroundingResult:
         query = self._extract_medication_candidate(question)
@@ -43,20 +116,6 @@ class DailyMedRetriever:
         product = dict(verified) if verified else None
         if not product: product = await self.india.exact_brand(query)
         if not product: product = await self.universal.resolve(query)
-
-        # Last-resort web discovery for unfamiliar brand/generic names. This
-        # does not answer clinical questions directly. It supplies discovery
-        # evidence only; clinical facts still require trusted sources.
-        web_discovery = await self._google_discovery(query)
-        if not product and web_discovery:
-            context, source = web_discovery
-            return GroundingResult(
-                {"name": query},
-                "Web discovery results for medicine identification only. Do not treat these snippets as authoritative clinical facts. " + context,
-                [source],
-                False,
-            )
-
         india_context = self._india_context(product) if product else {}
         medication_name = (product.get("generic_name") if product else None) or query
         product_source = self._product_source(product)
@@ -73,32 +132,20 @@ class DailyMedRetriever:
         if product:
             context = self._product_context(product)
             return GroundingResult({"name": query, **india_context}, context, [product_source] if product_source else [], bool(context))
-        return GroundingResult({"name": query}, f"No verified medication product or label was found for '{query}'. Do not guess its composition or use.", [], False)
 
-    async def _google_discovery(self, query: str) -> tuple[str, dict] | None:
-        """Search Google for unfamiliar medicine names without using it as a clinical source."""
-        if not self.settings.google_api_key or not self.settings.google_cse_id:
-            return None
-        search_query = f'"{query}" medicine tablet composition generic'
-        params = {"key": self.settings.google_api_key, "cx": self.settings.google_cse_id, "q": search_query, "num": 5, "safe": "active"}
-        try:
-            async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
-                response = await client.get("https://www.googleapis.com/customsearch/v1", params=params)
-                response.raise_for_status()
-                items = response.json().get("items", []) or []
-            snippets = []
-            for item in items:
-                title = str(item.get("title") or "").strip()
-                snippet = str(item.get("snippet") or "").strip()
-                if title and snippet:
-                    snippets.append(f"{title}: {snippet}")
-                if len(snippets) >= 5:
-                    break
-            if not snippets:
-                return None
-            return " ".join(snippets)[:5000], {"title": f"Google medicine discovery: {query}", "url": "https://www.google.com/", "source_type": "Web discovery (not clinical authority)", "published_or_updated": None}
-        except (httpx.HTTPError, ValueError, KeyError, TypeError):
-            return None
+        web_context, web_sources = await self.google_search.search(query, question)
+        if web_context:
+            return GroundingResult(
+                {"name": query},
+                (
+                    "Live web discovery found the following source extracts for the unresolved medication query. "
+                    "Use them only as supporting evidence and do not infer a composition or clinical fact that "
+                    "the sources do not establish.\n" + web_context
+                ),
+                web_sources,
+                True,
+            )
+        return GroundingResult({"name": query}, f"No verified medication product or label was found for '{query}'. Do not guess its composition or use.", [], False)
 
     async def _dailymed(self, medication: str, question: str) -> tuple[dict, str, dict] | None:
         try:
@@ -184,7 +231,13 @@ class DailyMedRetriever:
     @classmethod
     def _extract_medication_candidate(cls, question: str) -> str | None:
         q = question.lower().strip()
-        generic_patterns = [r"^what\s+is\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80}?)(?:\s+used\s+for)?[?!.]*$", r"^what\s+are\s+the\s+uses\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^tell\s+me\s+about\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^information\s+(?:on|about)\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$", r"^uses?\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$"]
+        generic_patterns = [
+            r"^what\s+is\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80}?)(?:\s+used\s+for)?[?!.]*$",
+            r"^what\s+are\s+the\s+uses\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
+            r"^tell\s+me\s+about\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
+            r"^information\s+(?:on|about)\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
+            r"^uses?\s+of\s+([A-Za-z][A-Za-z0-9 .+/-]{2,80})[?!.]*$",
+        ]
         for pattern in generic_patterns:
             match = re.match(pattern, q, re.I)
             if match:
@@ -195,7 +248,11 @@ class DailyMedRetriever:
             if plain and len(plain.split()) <= 5 and plain not in cls.STOPWORDS and not any(token in plain.split() for token in {"why", "when", "where", "should", "can", "could"}): return plain
         for name in cls.KNOWN:
             if re.search(rf"\b{re.escape(name)}\b", q): return name
-        brand_patterns = [r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b", r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b", r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b"]
+        brand_patterns = [
+            r"what\s+does\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:do|treat|contain|mean)\b",
+            r"what\s+is\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50}?)\s+(?:used|for)\b",
+            r"(?:about|for|taking|take|using|use)\s+([A-Za-z0-9][A-Za-z0-9 .&+/-]{2,50})\b",
+        ]
         for pattern in brand_patterns:
             match = re.search(pattern, question, re.I)
             if match:

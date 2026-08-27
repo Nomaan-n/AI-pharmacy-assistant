@@ -13,7 +13,7 @@ settings = get_settings()
 app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
-    description="A safety-aware medication information assistant grounded in DailyMed labeling and Indian drug identification data.",
+    description="A safety-aware medication information assistant grounded in drug labels, Indian drug identification data, and Google Agent Search over configured medical websites.",
 )
 app.add_middleware(
     CORSMiddleware,
@@ -33,7 +33,7 @@ async def home():
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": settings.app_version, "llm_configured": bool(settings.groq_api_key), "india_registry": True}
+    return {"status": "ok", "version": settings.app_version, "llm_configured": bool(settings.groq_api_key), "india_registry": True, "google_agent_search": bool(settings.google_api_key and settings.google_search_project_id and settings.google_search_engine_id)}
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
