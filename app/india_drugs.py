@@ -14,6 +14,14 @@ from .config import get_settings
 logger = logging.getLogger(__name__)
 
 KNOWN_BRANDS: dict[str, dict[str, str]] = {
+    "razod": {"brand_name": "Razo-D", "generic_name": "Rabeprazole 20 mg + Domperidone 30 mg", "manufacturer": "Dr Reddy's Laboratories Ltd", "strength": "20 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.apollopharmacy.in/medicine/razo-d-capsule", "source_title": "Apollo Pharmacy - Razo-D Capsule", "source_type": "Indian product reference"},
+    "rabizoledsr": {"brand_name": "Rabizole-DSR", "generic_name": "Rabeprazole 20 mg + Domperidone 30 mg", "manufacturer": "RSR Healthcare", "strength": "20 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.rsrhealthcare.com/our-products/", "source_title": "RSR Healthcare - Rabizole-DSR", "source_type": "Manufacturer product reference"},
+    "rabicrisdsr": {"brand_name": "Rabicris DSR", "generic_name": "Rabeprazole 20 mg + Domperidone 30 mg", "manufacturer": "Kris Pharma", "strength": "20 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.krispharma.com/wp-content/uploads/2021/11/KRIS-PHARMA-PRODUCT-LIST.pdf", "source_title": "Kris Pharma product list - Rabicris DSR", "source_type": "Manufacturer product reference"},
+    "pantalivedsr": {"brand_name": "Pantalive DSR", "generic_name": "Pantoprazole 40 mg + Domperidone 30 mg", "manufacturer": "Biolive Pharmaceuticals", "strength": "40 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://biolivepharmaceuticals.com/", "source_title": "Biolive Pharmaceuticals - Pantalive DSR", "source_type": "Manufacturer product reference"},
+    "rabilivedsr": {"brand_name": "Rabilive DSR", "generic_name": "Rabeprazole 20 mg + Domperidone 30 mg", "manufacturer": "Biolive Pharmaceuticals", "strength": "20 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://biolivepharmaceuticals.com/", "source_title": "Biolive Pharmaceuticals - Rabilive DSR", "source_type": "Manufacturer product reference"},
+    "rabikuldsr": {"brand_name": "Rabikul DSR", "generic_name": "Rabeprazole 20 mg + Domperidone 30 mg", "manufacturer": "Xieon Life", "strength": "20 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.xieonlife.com/product2", "source_title": "Xieon Life - Rabikul DSR", "source_type": "Manufacturer product reference"},
+    "rabeprazoledsr": {"brand_name": "Rabeprazole DSR", "generic_name": "Rabeprazole 20 mg + Domperidone 30 mg", "manufacturer": None, "strength": "20 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.1mg.com/medicines/razo-d-55369", "source_title": "1mg - Razo-D / Rabeprazole + Domperidone", "source_type": "Indian medicine reference"},
+    "rabiprazoledsr": {"brand_name": "Rabiprazole DSR", "generic_name": "Rabeprazole 20 mg + Domperidone 30 mg", "manufacturer": None, "strength": "20 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.1mg.com/medicines/razo-d-55369", "source_title": "1mg - Razo-D / Rabeprazole + Domperidone", "source_type": "Indian medicine reference"},
     "pantosecdsr": {"brand_name": "Pantosec DSR", "generic_name": "Pantoprazole 40 mg + Domperidone 30 mg", "manufacturer": "Cipla Ltd", "strength": "40 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://www.apollopharmacy.in/medicine/pantosec-dsr-capsule", "source_title": "Apollo Pharmacy - New Pantosec DSR Capsule", "source_type": "Indian product reference"},
     "pantociddsr": {"brand_name": "Pantocid DSR", "generic_name": "Pantoprazole 40 mg + Domperidone 30 mg", "manufacturer": "Sun Pharmaceutical Industries Ltd", "strength": "40 mg + 30 mg", "form": "sustained-release capsule", "source_url": "https://sunpharma.com/india-products/", "source_title": "Sun Pharma India Products - Pantocid DSR", "source_type": "Manufacturer product reference"},
     "zerodolsp": {"brand_name": "Zerodol-SP", "generic_name": "Aceclofenac 100 mg + Paracetamol 325 mg + Serratiopeptidase 15 mg", "manufacturer": "Ipca Laboratories Ltd", "strength": "100 mg + 325 mg + 15 mg", "form": "oral tablet", "source_url": "https://ipca.com/", "source_title": "IPCA domestic formulations", "source_type": "Manufacturer product reference"},
@@ -23,6 +31,9 @@ KNOWN_BRANDS: dict[str, dict[str, str]] = {
 }
 
 BRAND_ALIASES: dict[str, str] = {
+    "razodcapsule": "razod", "razodcapsulesr": "razod", "razodsr": "razod",
+    "rabizoledsr": "rabizoledsr", "rabicrisdsr": "rabicrisdsr", "pantalivedsr": "pantalivedsr", "rabilivedsr": "rabilivedsr", "rabikuldsr": "rabikuldsr",
+    "rabeprazoledsr": "rabeprazoledsr", "rabiprazoledsr": "rabiprazoledsr",
     "newpantosecdsr": "pantosecdsr", "pantosecdsr30": "pantosecdsr", "pantosecdsr3040": "pantosecdsr", "pantosecds": "pantosecdsr",
     "pantociddsr3040": "pantociddsr", "pantociddsr30": "pantociddsr",
     "zerodolsp10032515": "zerodolsp", "zerodolspas10080": "zerodolspas",
@@ -31,12 +42,7 @@ BRAND_ALIASES: dict[str, str] = {
 
 
 class IndiaDrugRegistry:
-    """Large active Indian medicine catalog with exact, generic and fuzzy lookup.
-
-    The build step imports the public Indian Medicine Dataset (253k+ records) and
-    filters out records explicitly marked discontinued. The runtime index is local
-    SQLite, so medicine lookup does not depend on a third-party search API being up.
-    """
+    """Large active Indian medicine catalog with exact, generic and fuzzy lookup."""
 
     def __init__(self) -> None:
         settings = get_settings()
@@ -58,7 +64,6 @@ class IndiaDrugRegistry:
         db = self._connect()
         if db:
             try:
-                # Exact names first, then prefix/substring matches, then composition.
                 sql = """
                 SELECT * FROM medicines
                 WHERE name_norm = ? OR name_norm LIKE ? OR composition_norm LIKE ?
@@ -71,7 +76,6 @@ class IndiaDrugRegistry:
                 db.close()
         if rows:
             return rows
-        # Keep the remote registry as a secondary fallback for records not present in the snapshot.
         try:
             async with httpx.AsyncClient(timeout=self.settings.request_timeout_seconds) as client:
                 response = await client.get(f"{self.settings.india_drug_db_url}/search", params={"q": query, "type": "medicine", "limit": limit, "detail": "full"})
