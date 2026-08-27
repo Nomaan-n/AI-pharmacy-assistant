@@ -5,7 +5,7 @@ import os
 import sqlite3
 import urllib.request
 
-SOURCE_URL = "https://raw.githubusercontent.com/junioralive/Indian-Medicine-Dataset/main/DATA/indian_medicine_data.csv"
+SOURCE_URL = "https://raw.githubusercontent.com/junioralive/Indian-Medicine-Dataset/main/DATA/updated_indian_medicine_data.csv"
 OUT = os.environ.get("INDIA_DRUG_INDEX", "data/india_medicines.sqlite3")
 TMP = "/tmp/indian_medicine_data.csv"
 
@@ -17,7 +17,7 @@ def norm(value: str | None) -> str:
 
 def main() -> None:
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
-    print("Downloading current Indian medicine dataset...")
+    print("Downloading updated Indian medicine dataset...")
     urllib.request.urlretrieve(SOURCE_URL, TMP)
 
     if os.path.exists(OUT):
@@ -48,7 +48,6 @@ def main() -> None:
     with open(TMP, "r", encoding="utf-8-sig", newline="") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
-            # The source explicitly marks discontinued products. Keep active products only.
             discontinued = str(row.get("Is_discontinued", "")).strip().upper()
             if discontinued in {"TRUE", "1", "YES", "Y"}:
                 skipped += 1
