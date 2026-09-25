@@ -1,0 +1,3 @@
+# No external package is required for the safe local checker.
+# The Reel's example used requests/colorama, but this scaffold intentionally
+# does not send automated requests to Instagram.
