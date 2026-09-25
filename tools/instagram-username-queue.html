@@ -1,69 +1,11 @@
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>3-Character Username Verification Queue</title>
-<style>
-body{font-family:system-ui,sans-serif;max-width:900px;margin:30px auto;padding:0 16px}
-textarea{width:100%;min-height:180px;font:14px monospace}
-button,select{padding:9px 12px;margin:5px 5px 5px 0}
-.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}
-.card{border:1px solid #ddd;border-radius:8px;padding:12px;font-family:monospace}
-small{display:block;font-family:system-ui;color:#666}
-#current{font-size:32px;font-weight:700;margin:20px 0}
-</style>
-</head>
-<body>
-<h1>3-Character Username Queue</h1>
-<p>Load a candidate CSV or paste usernames. This page does not contact Instagram. Verify each handle manually in Instagram and record the result here.</p>
-<input id="file" type="file" accept=".csv,.txt">
-<textarea id="input" placeholder="Paste usernames, one per line..."></textarea>
-<br>
-<button onclick="load()">Load candidates</button>
-<button onclick="exportCsv()">Export results</button>
-<button onclick="clearResults()">Clear results</button>
-<div id="current">No candidate loaded</div>
-<div>
-<button onclick="mark('available')">Available</button>
-<button onclick="mark('taken')">Taken</button>
-<button onclick="mark('uncertain')">Uncertain</button>
-<button onclick="next()">Skip</button>
-</div>
-<p id="stats"></p>
-<div id="list" class="grid"></div>
-<script>
-let items=[],i=0;
-const key='ig3queue';
-function parse(t){
- return [...new Set(t.split(/\r?\n/).map(x=>x.trim().replace(/^@/,'').split(',')[0]).filter(x=>/^[a-z0-9]{3}$/.test(x)))].map(username=>({username,status:'unverified'}));
-}
-function load(){
- const t=document.getElementById('input').value;
- if(t) items=parse(t);
- i=0; render();
-}
-document.getElementById('file').onchange=e=>{
- const f=e.target.files[0]; if(!f)return;
- const r=new FileReader(); r.onload=()=>{document.getElementById('input').value=r.result;load()}; r.readAsText(f);
-};
-function mark(s){if(!items[i])return;items[i].status=s;next();}
-function next(){if(i<items.length-1)i++;render();}
-function render(){
- const c=items[i];
- document.getElementById('current').textContent=c?'@'+c.username:'Finished';
- const counts={unverified:0,available:0,taken:0,uncertain:0};
- items.forEach(x=>counts[x.status]++);
- document.getElementById('stats').textContent='Total '+items.length+' | Unverified '+counts.unverified+' | Available '+counts.available+' | Taken '+counts.taken+' | Uncertain '+counts.uncertain;
- document.getElementById('list').innerHTML=items.slice(Math.max(0,i-20),i+21).map((x,j)=>'<div class="card">@'+x.username+'<small>'+x.status+'</small></div>').join('');
- localStorage.setItem(key,JSON.stringify(items));
-}
-function exportCsv(){
- const out=['username,status',...items.map(x=>x.username+','+x.status)].join('\n');
- const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([out],{type:'text/csv'}));a.download='instagram_username_results.csv';a.click();
-}
-function clearResults(){if(confirm('Clear the current queue?')){localStorage.removeItem(key);items=[];i=0;render();}}
-try{const saved=JSON.parse(localStorage.getItem(key));if(Array.isArray(saved)){items=saved;render();}}catch(e){}
-</script>
-</body>
-</html>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>3-Character Username Verification Queue</title><style>body{font-family:system-ui,sans-serif;max-width:900px;margin:30px auto;padding:0 16px}textarea{width:100%;min-height:180px;font:14px monospace}button{padding:9px 12px;margin:5px 5px 5px 0}.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:16px}.card{border:1px solid #ddd;border-radius:8px;padding:12px;font-family:monospace}.card small{display:block;font-family:system-ui;color:#666}#current{font-size:32px;font-weight:700;margin:20px 0}</style></head><body><h1>3-Character Username Queue</h1><p>Load candidates. This page does not contact Instagram. It prioritizes candidates locally and lets you record manual Instagram verification.</p><input id="file" type="file" accept=".csv,.txt"><textarea id="input" placeholder="Paste usernames, one per line..."></textarea><br><button onclick="load()">Load candidates</button><button onclick="sortItems()">Prioritize</button><button onclick="exportCsv()">Export results</button><button onclick="clearResults()">Clear results</button><div id="current">No candidate loaded</div><div><button onclick="mark('available')">Available</button><button onclick="mark('taken')">Taken</button><button onclick="mark('uncertain')">Uncertain</button><button onclick="next()">Skip</button></div><p id="stats"></p><div id="list" class="grid"></div><script>
+let items=[],i=0;const key='ig3queue';
+function score(s){let n=0;s=s.toLowerCase();if(/^[a-z]{3}$/.test(s)){n+=30;if(!/[aeiou]/.test(s))n+=8;if((s.match(/[aeiou]/g)||[]).length===1)n+=10;if(new Set(s).size===3)n+=8}if(/^[a-z][0-9][a-z]$/.test(s))n+=24;else if(/^[a-z]{2}[0-9]$/.test(s))n+=18;else if(/^[a-z][0-9]{2}$/.test(s))n+=12;if(new Set(s).size===1)n-=25;if(s[0]===s[1]||s[1]===s[2])n-=6;if((s.match(/[0-9]/g)||[]).length===3)n-=18;if(!/[il1o0]/.test(s))n+=3;return n}
+function parse(t){return [...new Set(t.split(/\r?\n/).map(x=>x.trim().replace(/^@/,'').split(',')[0].toLowerCase()).filter(x=>/^[a-z0-9]{3}$/.test(x)))].map(username=>({username,status:'unverified',score:score(username)}))}
+function load(){let t=document.getElementById('input').value;if(t)items=parse(t);i=0;sortItems()}
+document.getElementById('file').onchange=e=>{let f=e.target.files[0];if(!f)return;let r=new FileReader();r.onload=()=>{document.getElementById('input').value=r.result;load()};r.readAsText(f)};
+function sortItems(){items.sort((a,b)=>b.score-a.score||a.username.localeCompare(b.username));i=0;render()}
+function mark(s){if(!items[i])return;items[i].status=s;next()}function next(){if(i<items.length-1)i++;render()}
+function render(){let c=items[i];document.getElementById('current').textContent=c?'@'+c.username:'Finished';let z={unverified:0,available:0,taken:0,uncertain:0};items.forEach(x=>z[x.status]++);document.getElementById('stats').textContent='Total '+items.length+' | Unverified '+z.unverified+' | Available '+z.available+' | Taken '+z.taken+' | Uncertain '+z.uncertain;document.getElementById('list').innerHTML=items.slice(Math.max(0,i-20),i+21).map(x=>'<div class="card">@'+x.username+'<small>'+x.status+' · score '+x.score+'</small></div>').join('');localStorage.setItem(key,JSON.stringify(items))}
+function exportCsv(){let out=['username,status,score',...items.map(x=>x.username+','+x.status+','+x.score)].join('\n');let a=document.createElement('a');a.href=URL.createObjectURL(new Blob([out],{type:'text/csv'}));a.download='instagram_username_results.csv';a.click()}
+function clearResults(){if(confirm('Clear the current queue?')){localStorage.removeItem(key);items=[];i=0;render()}}try{let saved=JSON.parse(localStorage.getItem(key));if(Array.isArray(saved)){items=saved;render()}}catch(e){}</script></body></html>
